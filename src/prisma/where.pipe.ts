@@ -180,6 +180,7 @@ export default class WherePipe implements PipeTransform {
       rules.forEach((rule: any) => {
         const ruleKey = rule[0];
         const ruleValue = parseValue(rule[1]);
+        console.log({value, ruleKey, ruleValue})
         const data: Record<string, any> = {};
 
         [
