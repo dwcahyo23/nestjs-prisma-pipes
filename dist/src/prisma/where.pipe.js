@@ -126,6 +126,7 @@ let WherePipe = class WherePipe {
             rules.forEach((rule) => {
                 const ruleKey = rule[0];
                 const ruleValue = parseValue(rule[1]);
+                console.log({ value, ruleKey, ruleValue });
                 const data = {};
                 [
                     'lt',
