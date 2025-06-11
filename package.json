@@ -1,64 +1,70 @@
 {
-  "name": "@nodeteam/nestjs-pipes",
-  "version": "1.2.4",
-  "description": "Pipes collection for Nest.JS app",
-  "main": "./dist/src/index.js",
-  "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/nodeteamdev/nestjs-pipes.git"
-  },
-  "keywords": [
-    "nestjs",
-    "pipes",
-    "prisma"
-  ],
-  "author": "NodeTeam",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/nodeteamdev/nestjs-pipes/issues"
-  },
-  "homepage": "https://github.com/nodeteamdev/nestjs-pipes#readme",
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@types/jest": "^29.5.14",
-    "@typescript-eslint/eslint-plugin": "^5.51.0",
-    "@typescript-eslint/parser": "^5.51.0",
-    "cz-conventional-changelog": "^3.3.0",
-    "eslint": "^8.33.0",
-    "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-plugin-import": "^2.27.5"
-  },
-  "dependencies": {
-    "@nestjs/common": "^11.0.19",
-    "@nestjs/testing": "^11.0.19",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.3.2",
-    "typescript": "^5.8.3"
-  },
-  "config": {
-    "commitizen": {
-      "path": "./node_modules/cz-conventional-changelog"
-    }
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
-  }
+	"name": "@nodeteam/nestjs-pipes",
+	"version": "1.2.4",
+	"description": "Pipes collection for Nest.JS app",
+	"main": "./dist/index.js",
+	"types": "./index.d.ts",
+	"files": [
+		"dist",
+		"index.d.ts"
+	],
+	"scripts": {
+		"build": "tsc",
+		"test": "jest",
+		"test:watch": "jest --watch"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nodeteamdev/nestjs-pipes.git"
+	},
+	"keywords": [
+		"nestjs",
+		"pipes",
+		"prisma"
+	],
+	"author": "NodeTeam",
+	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/nodeteamdev/nestjs-pipes/issues"
+	},
+	"homepage": "https://github.com/nodeteamdev/nestjs-pipes#readme",
+	"devDependencies": {
+		"@jest/globals": "^29.7.0",
+		"@types/jest": "^29.5.14",
+		"@typescript-eslint/eslint-plugin": "^5.51.0",
+		"@typescript-eslint/parser": "^5.51.0",
+		"cz-conventional-changelog": "^3.3.0",
+		"eslint": "^8.33.0",
+		"eslint-config-airbnb-base": "^15.0.0",
+		"eslint-plugin-import": "^2.27.5"
+	},
+	"dependencies": {
+		"@nestjs/common": "^11.0.19",
+		"@nestjs/testing": "^11.0.19",
+		"jest": "^29.7.0",
+		"ts-jest": "^29.3.2",
+		"typescript": "^5.8.3"
+	},
+	"config": {
+		"commitizen": {
+			"path": "./node_modules/cz-conventional-changelog"
+		}
+	},
+	"jest": {
+		"moduleFileExtensions": [
+			"js",
+			"json",
+			"ts"
+		],
+		"rootDir": "",
+		"testRegex": ".*\\.spec\\.ts$",
+		"transform": {
+			"^.+\\.(t|j)s$": "ts-jest"
+		},
+		"collectCoverageFrom": [
+			"**/*.(t|j)s"
+		],
+		"coverageDirectory": "../coverage",
+		"testEnvironment": "node"
+	}
 }

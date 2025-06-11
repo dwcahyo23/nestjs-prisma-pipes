@@ -1,33 +1,38 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-const parseObjectLiteral = (objectLiteralString) => {
+/**
+ * Parse a string like "a: 1, b: 2" to { a: 1, b: 2 }
+ * @param objectLiteralString - String to parse
+ * @source https://github.com/mbest/js-object-literal-parse
+ */
+var parseObjectLiteral = function (objectLiteralString) {
     try {
-        const STRING_DOUBLE = '"(?:[^"\\\\]|\\\\.)*"';
-        const STRING_SINGLE = "'(?:[^'\\\\]|\\\\.)*'";
-        const STRING_REGEXP = '/(?:[^/\\\\]|\\\\.)*/w*';
-        const SPECIAL_CHARACTERS = ',"\'{}()/:[\\]';
-        const EVERYTHING_ELSE = `[^\\s:,/][^${SPECIAL_CHARACTERS}]*[^\\s${SPECIAL_CHARACTERS}]`;
-        const ONE_NOT_SPACE = '[^\\s]';
-        const TOKEN_REGEX = RegExp(`${STRING_DOUBLE}|${STRING_SINGLE}|${STRING_REGEXP}|${EVERYTHING_ELSE}|${ONE_NOT_SPACE}`, 'g');
-        const DIVISION_LOOK_BEHIND = /[\])"'A-Za-z0-9_$]+$/;
-        const KEYWORD_REGEX_LOOK_BEHIND = {
+        var STRING_DOUBLE = '"(?:[^"\\\\]|\\\\.)*"';
+        var STRING_SINGLE = "'(?:[^'\\\\]|\\\\.)*'";
+        var STRING_REGEXP = '/(?:[^/\\\\]|\\\\.)*/w*';
+        var SPECIAL_CHARACTERS = ',"\'{}()/:[\\]';
+        var EVERYTHING_ELSE = "[^\\s:,/][^".concat(SPECIAL_CHARACTERS, "]*[^\\s").concat(SPECIAL_CHARACTERS, "]");
+        var ONE_NOT_SPACE = '[^\\s]';
+        var TOKEN_REGEX_1 = RegExp("".concat(STRING_DOUBLE, "|").concat(STRING_SINGLE, "|").concat(STRING_REGEXP, "|").concat(EVERYTHING_ELSE, "|").concat(ONE_NOT_SPACE), 'g');
+        var DIVISION_LOOK_BEHIND = /[\])"'A-Za-z0-9_$]+$/;
+        var KEYWORD_REGEX_LOOK_BEHIND = {
             in: 1,
             return: 1,
             typeof: 1,
         };
-        let stringToParse = objectLiteralString.trim();
+        var stringToParse = objectLiteralString.trim();
         if (stringToParse.charCodeAt(0) === 123)
             stringToParse = stringToParse.slice(1, -1);
-        const result = [];
-        let tokens = stringToParse.match(TOKEN_REGEX);
+        var result = [];
+        var tokens = stringToParse.match(TOKEN_REGEX_1);
         if (!tokens)
             return result;
-        let key;
-        let values = [];
-        let depth = 0;
+        var key = void 0;
+        var values = [];
+        var depth = 0;
         tokens.push(',');
-        for (let i = 0, token; (token = tokens[i]); ++i) {
-            const characterCode = token.charCodeAt(0);
+        for (var i = 0, token = void 0; (token = tokens[i]); ++i) {
+            var characterCode = token.charCodeAt(0);
             if (characterCode === 44) {
                 if (depth <= 0) {
                     if (!key && values.length === 1) {
@@ -48,12 +53,12 @@ const parseObjectLiteral = (objectLiteralString) => {
                 }
             }
             else if (characterCode === 47 && i && token.length > 1) {
-                const match = tokens[i - 1].match(DIVISION_LOOK_BEHIND);
+                var match = tokens[i - 1].match(DIVISION_LOOK_BEHIND);
                 if (match && !KEYWORD_REGEX_LOOK_BEHIND[match[0]]) {
                     stringToParse = stringToParse.substr(stringToParse.indexOf(token) + 1);
-                    const result = stringToParse.match(TOKEN_REGEX);
-                    if (result)
-                        tokens = result;
+                    var result_1 = stringToParse.match(TOKEN_REGEX_1);
+                    if (result_1)
+                        tokens = result_1;
                     tokens.push(',');
                     i = -1;
                     token = '/';
@@ -78,4 +83,3 @@ const parseObjectLiteral = (objectLiteralString) => {
     }
 };
 exports.default = parseObjectLiteral;
-//# sourceMappingURL=parse-object-literal.js.map

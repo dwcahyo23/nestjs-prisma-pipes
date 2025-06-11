@@ -4,10 +4,10 @@ function delimetedStringObject(n, v, d) {
     n = n.split(d || '.');
     n.reverse();
     return n.reduce(function (res, it, c) {
+        var _a, _b;
         if (c === 0)
-            return { [it]: res };
-        return { [it]: { is: res } };
+            return _a = {}, _a[it] = res, _a;
+        return _b = {}, _b[it] = { is: res }, _b;
     }, v);
 }
 exports.default = delimetedStringObject;
-//# sourceMappingURL=delimeted-string-object.js.map
