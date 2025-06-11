@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
-import { Pipes } from '../..';
+import { Pipes } from 'src/pipes.types';
 import delimetedStringObject from '../helpers/delimeted-string-object';
 
 /**

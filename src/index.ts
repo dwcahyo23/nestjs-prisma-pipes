@@ -1,7 +1,7 @@
 import WherePipe from './prisma/where.pipe';
 import OrderByPipe from './prisma/order-by.pipe';
 import SelectPipe from './prisma/select.pipe';
-import * as Pipes from './types';
+import { Pipes } from './pipes.types';
 
 
 export {

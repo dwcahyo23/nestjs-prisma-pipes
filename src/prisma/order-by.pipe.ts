@@ -3,7 +3,7 @@ import {
 	Injectable,
 	PipeTransform,
 } from '@nestjs/common';
-import { Pipes } from '../..';
+import { Pipes } from 'src/pipes.types';
 
 /**
  * OrderByPipe is a PipeTransform implementation used to validate and parse

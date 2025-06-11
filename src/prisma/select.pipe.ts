@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
-import { Pipes } from '../..';
+import { Pipes } from 'src/pipes.types';
 
 /**
  * OrderByPipe is a PipeTransform class that is used to transform a string into a Pipes.Select object.
