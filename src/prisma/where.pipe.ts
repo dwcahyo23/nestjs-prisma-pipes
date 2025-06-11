@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
-import { Pipes } from '../../index';
+import { Pipes } from '../..';
 import delimetedStringObject from '../helpers/delimeted-string-object';
 
 /**
@@ -9,21 +9,21 @@ import delimetedStringObject from '../helpers/delimeted-string-object';
  * @returns {number} The parsed integer
  */
 const parseStringToInt = (ruleValue: string): number => {
-  if (!ruleValue.endsWith(')')) {
-    return 0;
-  }
+	if (!ruleValue.endsWith(')')) {
+		return 0;
+	}
 
-  if (!ruleValue.startsWith('int(')) {
-    return 0;
-  }
+	if (!ruleValue.startsWith('int(')) {
+		return 0;
+	}
 
-  const arr = /\(([^)]+)\)/.exec(ruleValue);
+	const arr = /\(([^)]+)\)/.exec(ruleValue);
 
-  if (!arr || !arr[1]) {
-    return 0;
-  }
+	if (!arr || !arr[1]) {
+		return 0;
+	}
 
-  return parseInt(arr[1], 10);
+	return parseInt(arr[1], 10);
 };
 
 /**
@@ -32,21 +32,21 @@ const parseStringToInt = (ruleValue: string): number => {
  * @returns {string} The parsed date in ISO format
  */
 const parseStringToDate = (ruleValue: string): string => {
-  if (!ruleValue.endsWith(')')) {
-    return '';
-  }
+	if (!ruleValue.endsWith(')')) {
+		return '';
+	}
 
-  if (!ruleValue.startsWith('date(') && !ruleValue.startsWith('datetime(')) {
-    return '';
-  }
+	if (!ruleValue.startsWith('date(') && !ruleValue.startsWith('datetime(')) {
+		return '';
+	}
 
-  const arr = /\(([^)]+)\)/.exec(ruleValue);
+	const arr = /\(([^)]+)\)/.exec(ruleValue);
 
-  if (!arr || !arr[1]) {
-    return '';
-  }
+	if (!arr || !arr[1]) {
+		return '';
+	}
 
-  return new Date(arr[1]).toISOString();
+	return new Date(arr[1]).toISOString();
 };
 
 /**
@@ -55,21 +55,21 @@ const parseStringToDate = (ruleValue: string): string => {
  * @returns {number} The parsed float
  */
 const parseStringToFloat = (ruleValue: string): number => {
-  if (!ruleValue.endsWith(')')) {
-    return 0;
-  }
+	if (!ruleValue.endsWith(')')) {
+		return 0;
+	}
 
-  if (!ruleValue.startsWith('float(')) {
-    return 0;
-  }
+	if (!ruleValue.startsWith('float(')) {
+		return 0;
+	}
 
-  const arr = /\(([^)]+)\)/.exec(ruleValue);
+	const arr = /\(([^)]+)\)/.exec(ruleValue);
 
-  if (!arr || !arr[1]) {
-    return 0;
-  }
+	if (!arr || !arr[1]) {
+		return 0;
+	}
 
-  return parseFloat(arr[1]);
+	return parseFloat(arr[1]);
 };
 
 /**
@@ -78,21 +78,21 @@ const parseStringToFloat = (ruleValue: string): number => {
  * @returns {string} The parsed string
  */
 const parseStringToString = (ruleValue: string): string => {
-  if (!ruleValue.endsWith(')')) {
-    return '';
-  }
+	if (!ruleValue.endsWith(')')) {
+		return '';
+	}
 
-  if (!ruleValue.startsWith('string(')) {
-    return '';
-  }
+	if (!ruleValue.startsWith('string(')) {
+		return '';
+	}
 
-  const arr = /\(([^)]+)\)/.exec(ruleValue);
+	const arr = /\(([^)]+)\)/.exec(ruleValue);
 
-  if (!arr || !arr[1]) {
-    return '';
-  }
+	if (!arr || !arr[1]) {
+		return '';
+	}
 
-  return arr[1];
+	return arr[1];
 };
 
 /**
@@ -101,21 +101,21 @@ const parseStringToString = (ruleValue: string): string => {
  * @returns {boolean} The parsed boolean
  */
 const parseStringToBoolean = (ruleValue: string): boolean => {
-  if (!ruleValue.endsWith(')')) {
-    return false;
-  }
+	if (!ruleValue.endsWith(')')) {
+		return false;
+	}
 
-  if (!ruleValue.startsWith('boolean(') && !ruleValue.startsWith('bool(')) {
-    return false;
-  }
+	if (!ruleValue.startsWith('boolean(') && !ruleValue.startsWith('bool(')) {
+		return false;
+	}
 
-  const arr = /\(([^)]+)\)/.exec(ruleValue);
+	const arr = /\(([^)]+)\)/.exec(ruleValue);
 
-  if (!arr || !arr[1]) {
-    return false;
-  }
+	if (!arr || !arr[1]) {
+		return false;
+	}
 
-  return arr[1] === 'true';
+	return arr[1] === 'true';
 };
 
 /**
@@ -124,45 +124,45 @@ const parseStringToBoolean = (ruleValue: string): boolean => {
  * @returns {string | number | boolean | object} The parsed value
  */
 const parseValue = (ruleValue: string): string | number | boolean | object => {
-  if (ruleValue.startsWith('array(')) {
-    const validRegExec = /\(([^]+)\)/.exec(ruleValue);
+	if (ruleValue.startsWith('array(')) {
+		const validRegExec = /\(([^]+)\)/.exec(ruleValue);
 
-    if (validRegExec) {
-      return validRegExec[1]
-        .split(',')
-        .map((value) => {
-          switch (true) {
-            case value.startsWith('int('):
-              return parseStringToInt(value);
-            case value.startsWith('date(') || value.startsWith('datetime('):
-              return parseStringToDate(value);
-            case value.startsWith('float('):
-              return parseStringToFloat(value);
-            case value.startsWith('string('):
-              return parseStringToString(value);
-            case value.startsWith('boolean(') || value.startsWith('bool('):
-              return parseStringToBoolean(value);
-            default:
-              return value;
-          }
-        });
-    }
-  }
+		if (validRegExec) {
+			return validRegExec[1]
+				.split(',')
+				.map((value) => {
+					switch (true) {
+						case value.startsWith('int('):
+							return parseStringToInt(value);
+						case value.startsWith('date(') || value.startsWith('datetime('):
+							return parseStringToDate(value);
+						case value.startsWith('float('):
+							return parseStringToFloat(value);
+						case value.startsWith('string('):
+							return parseStringToString(value);
+						case value.startsWith('boolean(') || value.startsWith('bool('):
+							return parseStringToBoolean(value);
+						default:
+							return value;
+					}
+				});
+		}
+	}
 
-  switch (true) {
-    case ruleValue.startsWith('int('):
-      return parseStringToInt(ruleValue);
-    case ruleValue.startsWith('date(') || ruleValue.startsWith('datetime('):
-      return parseStringToDate(ruleValue);
-    case ruleValue.startsWith('float('):
-      return parseStringToFloat(ruleValue);
-    case ruleValue.startsWith('string('):
-      return parseStringToString(ruleValue);
-    case ruleValue.startsWith('boolean(') || ruleValue.startsWith('bool('):
-      return parseStringToBoolean(ruleValue);
-    default:
-      return ruleValue;
-  }
+	switch (true) {
+		case ruleValue.startsWith('int('):
+			return parseStringToInt(ruleValue);
+		case ruleValue.startsWith('date(') || ruleValue.startsWith('datetime('):
+			return parseStringToDate(ruleValue);
+		case ruleValue.startsWith('float('):
+			return parseStringToFloat(ruleValue);
+		case ruleValue.startsWith('string('):
+			return parseStringToString(ruleValue);
+		case ruleValue.startsWith('boolean(') || ruleValue.startsWith('bool('):
+			return parseStringToBoolean(ruleValue);
+		default:
+			return ruleValue;
+	}
 };
 
 /**
@@ -171,64 +171,64 @@ const parseValue = (ruleValue: string): string | number | boolean | object => {
  * */
 @Injectable()
 export default class WherePipe implements PipeTransform {
-  transform(value: string): Pipes.Where | undefined {
-    if (value == null) return undefined;
-    try {
-      const rules = parseObjectLiteral(value);
-      let items: Record<string, any> = {};
+	transform(value: string): Pipes.Where | undefined {
+		if (value == null) return undefined;
+		try {
+			const rules = parseObjectLiteral(value);
+			let items: Record<string, any> = {};
 
-      rules.forEach((rule: any) => {
-        const ruleKey = rule[0];
-        const ruleValue = parseValue(rule[1]);
-        console.log({value, ruleKey, ruleValue})
-        const data: Record<string, any> = {};
+			rules.forEach((rule: any) => {
+				const ruleKey = rule[0];
+				const ruleValue = parseValue(rule[1]);
+				console.log({ value, ruleKey, ruleValue })
+				const data: Record<string, any> = {};
 
-        [
-          'lt',
-          'lte',
-          'gt',
-          'gte',
-          'equals',
-          'not',
-          'contains',
-          'startsWith',
-          'endsWith',
-          'every',
-          'some',
-          'none',
-          'in',
-          'has',
-          'hasEvery',
-          'hasSome',
-        ].forEach((val) => {
-          if (rule[1].startsWith(`${val} `) && typeof ruleValue === 'string') {            
+				[
+					'lt',
+					'lte',
+					'gt',
+					'gte',
+					'equals',
+					'not',
+					'contains',
+					'startsWith',
+					'endsWith',
+					'every',
+					'some',
+					'none',
+					'in',
+					'has',
+					'hasEvery',
+					'hasSome',
+				].forEach((val) => {
+					if (rule[1].startsWith(`${val} `) && typeof ruleValue === 'string') {
 
-            data[val] = parseValue(ruleValue.replace(`${val} `, ''));          
+						data[val] = parseValue(ruleValue.replace(`${val} `, ''));
 
-            items[ruleKey] = data;
+						items[ruleKey] = data;
 
-          }
-        });      
+					}
+				});
 
-        if (ruleKey.indexOf('.') !== -1){
+				if (ruleKey.indexOf('.') !== -1) {
 
-          const delimeted = delimetedStringObject(ruleKey, data)
+					const delimeted = delimetedStringObject(ruleKey, data)
 
-          return items = {...delimeted}
+					return items = { ...delimeted }
 
-        } 
+				}
 
-        if (ruleValue != null && ruleValue !== '') {
-        
-        return items[ruleKey] = items[ruleKey] || ruleValue;
+				if (ruleValue != null && ruleValue !== '') {
 
-        }
-      });
+					return items[ruleKey] = items[ruleKey] || ruleValue;
 
-      return items;
-    } catch (error) {
-      console.error('Error parsing query string:', error);
-      throw new BadRequestException('Invalid query format');
-    }
-  }
+				}
+			});
+
+			return items;
+		} catch (error) {
+			console.error('Error parsing query string:', error);
+			throw new BadRequestException('Invalid query format');
+		}
+	}
 }

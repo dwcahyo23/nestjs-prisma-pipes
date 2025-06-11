@@ -2,12 +2,7 @@
 	"name": "@nodeteam/nestjs-pipes",
 	"version": "1.2.4",
 	"description": "Pipes collection for Nest.JS app",
-	"main": "./dist/index.js",
-	"types": "./index.d.ts",
-	"files": [
-		"dist",
-		"index.d.ts"
-	],
+	"main": "./dist/src/index.js",
 	"scripts": {
 		"build": "tsc",
 		"test": "jest",
