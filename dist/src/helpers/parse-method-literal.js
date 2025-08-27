@@ -14,5 +14,4 @@ const methodLiteral = (methodLiteral) => {
 const mystring = "AND{string.string: contains string(abc)}";
 const PARENTHESES = "/\{([^}]+)\}/";
 const TOKEN_REGEX = RegExp(`${PARENTHESES}`, 'g');
-console.log(mystring.match(TOKEN_REGEX));
 //# sourceMappingURL=parse-method-literal.js.map

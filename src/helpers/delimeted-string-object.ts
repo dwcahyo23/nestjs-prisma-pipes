@@ -1,11 +1,18 @@
-function delimetedStringObject(n: string[], v: any, d?: string): object {
+function delimetedStringObject(n: string, v: any, d = '.'): object {
+	const parts = n.split(d);
+	parts.reverse();
 
-	n = (<string><unknown>n).split(d || '.');
-	n.reverse();
-	return n.reduce(function(res, it, c ) {
-	if(c === 0) return {[it]: res}
-	  return {[it]: {is: res} }
-	},v);
-  }
+	return parts.reduce((res, it, idx) => {
+		// kalau level terakhir langsung isi value
+		if (idx === 0) return { [it]: res };
 
-  export default delimetedStringObject
+		// kalau parent pakai salah satu keyword Prisma relation filter
+		if (['is', 'some', 'every', 'none'].includes(it)) {
+			return { [it]: res };
+		}
+
+		return { [it]: res };
+	}, v);
+}
+
+export default delimetedStringObject

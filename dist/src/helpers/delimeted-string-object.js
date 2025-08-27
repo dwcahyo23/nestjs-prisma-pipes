@@ -1,12 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-function delimetedStringObject(n, v, d) {
-    n = n.split(d || '.');
-    n.reverse();
-    return n.reduce(function (res, it, c) {
-        if (c === 0)
+function delimetedStringObject(n, v, d = '.') {
+    const parts = n.split(d);
+    parts.reverse();
+    return parts.reduce((res, it, idx) => {
+        if (idx === 0)
             return { [it]: res };
-        return { [it]: { is: res } };
+        if (['is', 'some', 'every', 'none'].includes(it)) {
+            return { [it]: res };
+        }
+        return { [it]: res };
     }, v);
 }
 exports.default = delimetedStringObject;

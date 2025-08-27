@@ -1,136 +1,175 @@
+
+---
+
 # Installation
 
+Install langsung dari GitHub fork:
+
 ```bash
-npm install --save @nodeteam/nestjs-pipes
-```
+npm install --save github:dwcahyo23/nestjs-pipes
 
 # Usage
 
-```typescript
+```ts
 // import pipes
-import { WherePipe, OrderByPipe } from '@nodeteam/nestjs-pipes';
+import { WherePipe, OrderByPipe, SelectPipe } from '@nodeteam/nestjs-pipes';
 // import types
 import { Pipes } from '@nodeteam/nestjs-pipes/index';
 ```
 
-# #OrderByPipe
+---
 
-```typescript
-@Query('orderBy', OrderByPipe) orderBy?: Pipes.Order,
+# OrderByPipe
+
+Gunakan untuk mengubah query string `orderBy` menjadi Prisma order filter.
+
+```ts
+@Query('orderBy', OrderByPipe) orderBy?: Pipes.Order
 ```
 
-### Examples:
+### Example
 
-* Sort the rows by the column `firstName` in ascending order
+Sort kolom `firstName` ascending:
+
 ```
-https://example.com/?sortBy=firstName:asc
+https://example.com/?orderBy=firstName:asc
 ```
 
+---
 
-# #WherePipe
+# WherePipe
 
-## Operators realized:
+Gunakan untuk mengubah query string `where` menjadi Prisma where filter.
 
-**in** - `where=zipCode: in array(11111, 22222)`
-
-**lt** - `where=age: lt int(12)`
-
-**lt** - `where=age: lt int(12)`
-
-**lte** - `where=age: lte int(12)`
-
-**gt** - `where=age: gt int(12)`
-
-**gte** - `where=age: gte int(12)`
-
-**equals** - `where=age: equals int(12)`
-
-**not** - `where=age: not int(12)`
-
-**contains** - `where=firstName: contains string(John)` or `where=firstName: contains John`
-
-**startsWith** - `where=firstName: startsWith string(John)` or `where=firstName: startsWith John`
-
-**endsWith** - `where=firstName: endsWith string(John)` or `where=firstName: endsWith John`
-
-**every** - `where=firstName: every string(John)` or `where=firstName: every John`
-
-**some** - `where=firstName: some string(John)` or `where=firstName: some John`
-
-**none** - `where=firstName: none string(John)` or `where=firstName: none John`
-
-## Where types realized:
-
-**string** - `where=firstName: contains string(John)`
-
-**int** - `where=age: gt int(12)`
-
-**float** - `where=age: gt float(12.5)`
-
-**boolean** - `where=active: equals boolean(true)`
-
-**bool** - `where=active: equals boolean(true)`
-
-**date** - `where=createdAt: gt date(2019-01-01)`
-
-**datetime** - `where=createdAt: gt datetime(2019-01-01 12:00:00)`
-
-**array** - `where=zipCode: in array(int(111111), int(222222))`
-
-**nested object** - `where=user.firstName: contains string(Jhon)`
-
-**multiple nested object** - `where=user.data.account.role: contains string(Admin)`
-
-```typescript
+```ts
 @Query('where', WherePipe) where?: Pipes.Where
 ```
 
-### Examples:
+---
 
-* Select all the rows where the column `firstName` is equal to `John`
+## Operators
+
+* **equals** – `where=age: equals int(12)`
+* **not** – `where=age: not int(12)`
+* **in** – `where=zipCode: in array(int(11111), int(22222))`
+* **lt** – `where=age: lt int(12)`
+* **lte** – `where=age: lte int(12)`
+* **gt** – `where=age: gt int(12)`
+* **gte** – `where=age: gte int(12)`
+* **contains** – `where=firstName: contains string(John)`
+* **startsWith** – `where=firstName: startsWith string(John)`
+* **endsWith** – `where=firstName: endsWith string(John)`
+* **has** – `where=tags: has yellow`
+* **hasEvery** – `where=tags: hasEvery array(yellow, green)`
+* **hasSome** – `where=tags: hasSome array(yellow, green)`
+* **is** – relation filter tunggal (one-to-one)
+* **some** – relation filter (minimal satu cocok)
+* **every** – relation filter (semua cocok)
+* **none** – relation filter (tidak ada yang cocok)
+
+---
+
+## Types
+
+* **string** – `where=firstName: contains string(John)`
+* **int** – `where=age: gt int(12)`
+* **float** – `where=price: gt float(12.5)`
+* **boolean / bool** – `where=active: equals boolean(true)`
+* **date** – `where=createdAt: gt date(2019-01-01)`
+* **datetime** – `where=createdAt: gt datetime(2019-01-01 12:00:00)`
+* **array** – `where=zipCode: in array(int(111111), int(222222))`
+
+---
+
+## Nested Relation Filters
+
+Mendukung Prisma-style nested relation filter dengan keyword:
+
+* `is` – one-to-one relation
+* `some` – minimal satu cocok
+* `every` – semua cocok
+* `none` – tidak ada yang cocok
+
+### Examples
+
+* Relation tunggal
+
+```
+?where=profile.is.firstName: contains string(John)
+```
+
+* Relation many-to-many
+
+```
+?where=posts.some.title: contains string(Hello)
+```
+
+* Deeply nested
+
+```
+?where=company.is.departments.some.employees.every.name: contains string(John)
+```
+
+---
+
+## Examples
+
+* Semua row dengan `firstName = John`
+
 ```
 https://example.com/?where=firstName:John
 ```
 
-* Select all the rows where createdAt is greater than 2023-01-13 12:04:27.689
+* Semua row dengan `createdAt > 2023-01-13 12:04:27.689`
+
 ```
 https://example.com/?where=createdAt: gt date(2023-01-13 12:04:27.689)
 ```
 
-* Select all rows where id is not equal to 1
+* Semua row dengan `id ≠ 12`
+
 ```
 https://example.com/?where=id: not int(12)
 ```
 
-* Select all rows where id is greater than 1 and email contains `@gmail.com`
+* Multi filter (default `AND`)
+
 ```
 https://example.com/?where=id: gt int(1), email: contains @gmail.com
 ```
 
-# WherePipe vs OrderByPipe
+---
 
-### Examples:
+# WherePipe + OrderByPipe
 
-* Select all the rows where the column `firstName` is equal to `John` and sort the rows by the column `firstName` in ascending order
+Combine filter & sort:
+
 ```
-https://example.com/?where=firstName:John&sortBy=firstName:asc
+https://example.com/?where=firstName:John&orderBy=firstName:asc
 ```
 
-# #SelectPipe
+---
 
-```typescript
+# SelectPipe
+
+Gunakan untuk memilih kolom tertentu.
+
+```ts
 @Query('select', SelectPipe) select?: Pipes.Select
 ```
 
-### Examples:
+### Examples
 
-* Select the columns `firstName` and `lastName`
+* Select kolom `firstName` dan `lastName`
+
 ```
 https://example.com/?select=firstName,lastName
 ```
 
-* Exclude the columns `firstName` and `lastName`
+* Exclude kolom `firstName` dan `lastName`
 
 ```
 https://example.com/?select=-firstName,-lastName
 ```
+
+---

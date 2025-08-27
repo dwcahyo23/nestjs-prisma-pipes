@@ -13,64 +13,153 @@ describe('WherePipe', () => {
         }).compile();
         pipe = moduleRef.get(where_pipe_1.default);
     });
-    it('should parse "and" from string "tags: contains string(123) , name: contains string(name)"', () => {
-        const string = 'and(tags: contains string(123), name: contains string(name))';
+    it('if transform value is empty pipe return empty json', () => {
+        const result = pipe.transform('');
+        expect(result).toEqual({});
+    });
+    it('if transform value is date should return parsed date', () => {
+        const date = `date:${Date.now()}`;
+        expect(pipe.transform(date)).toEqual({
+            date: expect.any(String),
+        });
+    });
+    it('if transform value is float should return parsed float', () => {
+        const float = 'number: 0.0005';
+        expect(pipe.transform(float)).toEqual({
+            number: '0.0005',
+        });
+    });
+    it('if transform value is string should return parsed string', () => {
+        const user = 'userName: name';
+        expect(pipe.transform(user)).toEqual({
+            userName: 'name',
+        });
+    });
+    it('if transform value is boolean should return parsed boolean', () => {
+        const question = 'quest: true';
+        expect(pipe.transform(question)).toEqual({
+            quest: 'true',
+        });
+    });
+    it('if transform value is integer should return parsed int', () => {
+        const integer = 'number: 5';
+        expect(pipe.transform(integer)).toEqual({
+            number: '5',
+        });
+    });
+    it('if transform value is array should return [in: array] ', () => {
+        const string = 'zipCode: in array(int(111), int(222))';
         expect(pipe.transform(string)).toEqual({
-            AND: {
-                tags: {
-                    contains: "123"
-                },
-                name: {
-                    contains: "name"
-                }
+            zipCode: {
+                in: [111, 222]
+            },
+        });
+    });
+    it('should parse "has" from string "tags: has yellow"', () => {
+        const string = 'tags: has yellow';
+        expect(pipe.transform(string)).toEqual({
+            tags: {
+                has: "yellow",
+            },
+        });
+    });
+    it('should parse "hasEvery" from string "tags: hasEvery array(yellow, green)"', () => {
+        const string = 'tags: hasEvery array(yellow, green)';
+        expect(pipe.transform(string)).toEqual({
+            tags: {
+                hasEvery: ["yellow", "green"],
+            },
+        });
+    });
+    it('should parse "hasEvery" from string "numbers: hasEvery array(int(5), int(8))"', () => {
+        const string = 'numbers: hasEvery array(int(5), int(8))';
+        expect(pipe.transform(string)).toEqual({
+            numbers: {
+                hasEvery: [5, 8],
+            },
+        });
+    });
+    it('should parse "hasSome" from string "tags: hasSome array(yellow, green)"', () => {
+        const string = 'tags: hasSome array(yellow, green)';
+        expect(pipe.transform(string)).toEqual({
+            tags: {
+                hasSome: ["yellow", "green"],
+            },
+        });
+    });
+    it('should parse "contains" from string "tags: contains string(123)"', () => {
+        const string = 'tags: contains string(123)';
+        expect(pipe.transform(string)).toEqual({
+            tags: {
+                contains: "123"
             }
         });
     });
-    it('should parse "." from string "tags.id: contains string(123)"', () => {
-        const string = 'tags.id: contains string(123)';
+    it('should parse nested ".is" relation filter', () => {
+        const string = 'profile.is.id: equals int(10)';
         expect(pipe.transform(string)).toEqual({
-            tags: {
+            profile: {
                 is: {
                     id: {
-                        contains: "123"
-                    }
-                }
+                        equals: 10,
+                    },
+                },
             },
         });
     });
-    it('should parse "." from string "user.data.role: hasSome array(admin, user)"', () => {
-        const string = 'user.data.role: hasSome array(yellow, green)';
+    it('should parse nested ".some" relation filter', () => {
+        const string = 'posts.some.title: contains string(Hello)';
         expect(pipe.transform(string)).toEqual({
-            user: {
-                is: {
-                    data: {
-                        is: {
-                            role: {
-                                hasSome: ["yellow", "green"]
-                            }
-                        }
-                    }
-                }
+            posts: {
+                some: {
+                    title: {
+                        contains: 'Hello',
+                    },
+                },
             },
         });
     });
-    it('should parse "." from string "user.data.account.role: contains string(Admin): contains string(Jhon)"', () => {
-        const string = 'user.data.account.role: contains string(Admin): contains string(Jhon)';
+    it('should parse nested ".every" relation filter', () => {
+        const string = 'users.every.role: equals string(admin)';
         expect(pipe.transform(string)).toEqual({
-            user: {
+            users: {
+                every: {
+                    role: {
+                        equals: 'admin',
+                    },
+                },
+            },
+        });
+    });
+    it('should parse nested ".none" relation filter', () => {
+        const string = 'orders.none.status: equals string(cancelled)';
+        expect(pipe.transform(string)).toEqual({
+            orders: {
+                none: {
+                    status: {
+                        equals: 'cancelled',
+                    },
+                },
+            },
+        });
+    });
+    it('should parse deeply nested ".some" relation filter', () => {
+        const string = 'company.is.departments.some.employees.every.name: contains string(John)';
+        expect(pipe.transform(string)).toEqual({
+            company: {
                 is: {
-                    data: {
-                        is: {
-                            account: {
-                                is: {
-                                    role: {
-                                        contains: "Admin"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                    departments: {
+                        some: {
+                            employees: {
+                                every: {
+                                    name: {
+                                        contains: 'John',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             },
         });
     });
