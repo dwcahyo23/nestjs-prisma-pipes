@@ -6,15 +6,15 @@
 Install langsung dari GitHub fork:
 
 ```bash
-npm install --save github:dwcahyo23/nestjs-pipes
+npm install --save @dwcahyo/nestjs-prisma-pipes
 
 # Usage
 
 ```ts
 // import pipes
-import { WherePipe, OrderByPipe, SelectPipe } from '@nodeteam/nestjs-pipes';
+import { WherePipe, OrderByPipe, SelectPipe } from '@dwcahyo/nestjs-prisma-pipes';
 // import types
-import { Pipes } from '@nodeteam/nestjs-pipes/index';
+import { Pipes } from '@dwcahyo/nestjs-prisma-pipes/index';
 ```
 
 ---
