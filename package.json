@@ -1,6 +1,9 @@
 {
 	"name": "@dwcahyo/nestjs-prisma-pipes",
 	"version": "1.0.0",
+	"publishConfig": {
+		"access": "public"
+	},
 	"description": "NestJS pipes collection for Prisma (forked and improved from @nodeteam/nestjs-prisma-pipes)",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
