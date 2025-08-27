@@ -1,175 +1,169 @@
 
+# @dwcahyo/nestjs-prisma-pipes
+
+Utility pipes untuk **NestJS + Prisma**: parsing query string (`where`, `orderBy`, `select`, `include`) langsung menjadi Prisma filter object.
+
 ---
 
-# Installation
-
-Install langsung dari GitHub fork:
+## 📦 Installation
 
 ```bash
 npm install --save @dwcahyo/nestjs-prisma-pipes
-
-# Usage
-
-```ts
-// import pipes
-import { WherePipe, OrderByPipe, SelectPipe } from '@dwcahyo/nestjs-prisma-pipes';
-// import types
-import { Pipes } from '@dwcahyo/nestjs-prisma-pipes/index';
 ```
 
 ---
 
-# OrderByPipe
+## 🔽 Pipes
 
-Gunakan untuk mengubah query string `orderBy` menjadi Prisma order filter.
+### 🔹 OrderByPipe
+
+Mengubah query string `orderBy` menjadi Prisma **order filter**.
 
 ```ts
 @Query('orderBy', OrderByPipe) orderBy?: Pipes.Order
 ```
 
-### Example
+**Example**
 
-Sort kolom `firstName` ascending:
-
-```
+```url
 https://example.com/?orderBy=firstName:asc
 ```
 
 ---
 
-# WherePipe
+### 🔹 WherePipe
 
-Gunakan untuk mengubah query string `where` menjadi Prisma where filter.
+Mengubah query string `where` menjadi Prisma **where filter**.
 
 ```ts
 @Query('where', WherePipe) where?: Pipes.Where
 ```
 
----
+#### Operators
 
-## Operators
+* `equals` → `where=age: equals int(12)`
+* `not` → `where=age: not int(12)`
+* `in` → `where=zipCode: in array(int(11111), int(22222))`
+* `lt` / `lte` / `gt` / `gte`
+* `contains` / `startsWith` / `endsWith`
+* `has` / `hasEvery` / `hasSome`
+* `is` / `some` / `every` / `none` → relation filter
 
-* **equals** – `where=age: equals int(12)`
-* **not** – `where=age: not int(12)`
-* **in** – `where=zipCode: in array(int(11111), int(22222))`
-* **lt** – `where=age: lt int(12)`
-* **lte** – `where=age: lte int(12)`
-* **gt** – `where=age: gt int(12)`
-* **gte** – `where=age: gte int(12)`
-* **contains** – `where=firstName: contains string(John)`
-* **startsWith** – `where=firstName: startsWith string(John)`
-* **endsWith** – `where=firstName: endsWith string(John)`
-* **has** – `where=tags: has yellow`
-* **hasEvery** – `where=tags: hasEvery array(yellow, green)`
-* **hasSome** – `where=tags: hasSome array(yellow, green)`
-* **is** – relation filter tunggal (one-to-one)
-* **some** – relation filter (minimal satu cocok)
-* **every** – relation filter (semua cocok)
-* **none** – relation filter (tidak ada yang cocok)
+#### Types
 
----
+* `string` → `where=firstName: contains string(John)`
+* `int` → `where=age: gt int(12)`
+* `float` → `where=price: gt float(12.5)`
+* `boolean` → `where=active: equals boolean(true)`
+* `date` → `where=createdAt: gt date(2019-01-01)`
+* `datetime` → `where=createdAt: gt datetime(2019-01-01 12:00:00)`
+* `array` → `where=zipCode: in array(int(111111), int(222222))`
 
-## Types
+#### Examples
 
-* **string** – `where=firstName: contains string(John)`
-* **int** – `where=age: gt int(12)`
-* **float** – `where=price: gt float(12.5)`
-* **boolean / bool** – `where=active: equals boolean(true)`
-* **date** – `where=createdAt: gt date(2019-01-01)`
-* **datetime** – `where=createdAt: gt datetime(2019-01-01 12:00:00)`
-* **array** – `where=zipCode: in array(int(111111), int(222222))`
-
----
-
-## Nested Relation Filters
-
-Mendukung Prisma-style nested relation filter dengan keyword:
-
-* `is` – one-to-one relation
-* `some` – minimal satu cocok
-* `every` – semua cocok
-* `none` – tidak ada yang cocok
-
-### Examples
-
-* Relation tunggal
-
-```
-?where=profile.is.firstName: contains string(John)
-```
-
-* Relation many-to-many
-
-```
-?where=posts.some.title: contains string(Hello)
-```
-
-* Deeply nested
-
-```
-?where=company.is.departments.some.employees.every.name: contains string(John)
-```
-
----
-
-## Examples
-
-* Semua row dengan `firstName = John`
-
-```
+```url
 https://example.com/?where=firstName:John
-```
-
-* Semua row dengan `createdAt > 2023-01-13 12:04:27.689`
-
-```
 https://example.com/?where=createdAt: gt date(2023-01-13 12:04:27.689)
-```
-
-* Semua row dengan `id ≠ 12`
-
-```
 https://example.com/?where=id: not int(12)
-```
-
-* Multi filter (default `AND`)
-
-```
 https://example.com/?where=id: gt int(1), email: contains @gmail.com
 ```
 
+#### Nested Relation Filters
+
+Mendukung Prisma-style nested relation filter:
+
+```url
+https://example.com/?where=profile.is.firstName: contains string(John)
+https://example.com/?where=posts.some.title: contains string(Hello)
+https://example.com/?where=company.is.departments.some.employees.every.name: contains string(John)
+```
+
 ---
 
-# WherePipe + OrderByPipe
+### 🔹 SelectPipe
 
-Combine filter & sort:
-
-```
-https://example.com/?where=firstName:John&orderBy=firstName:asc
-```
-
----
-
-# SelectPipe
-
-Gunakan untuk memilih kolom tertentu.
+Memilih kolom tertentu pada query.
 
 ```ts
 @Query('select', SelectPipe) select?: Pipes.Select
 ```
 
-### Examples
+**Examples**
 
-* Select kolom `firstName` dan `lastName`
-
-```
+```url
 https://example.com/?select=firstName,lastName
-```
-
-* Exclude kolom `firstName` dan `lastName`
-
-```
 https://example.com/?select=-firstName,-lastName
 ```
 
 ---
+
+### 🔹 IncludePipe
+
+Mengubah query string `include` menjadi Prisma **include object**.
+
+```ts
+@Query('include', IncludePipe) include?: Pipes.Include
+```
+
+**Examples**
+
+* Simple include:
+
+```url
+https://example.com/?include=profile
+```
+
+```ts
+{ include: { profile: true } }
+```
+
+* Nested include:
+
+```url
+https://example.com/?include=posts.comments
+```
+
+```ts
+{ include: { posts: { include: { comments: true } } } }
+```
+
+* Include dengan `select`:
+
+```url
+https://example.com/?include=profile.select:(id,firstName,lastName)
+```
+
+```ts
+{
+  include: {
+    profile: {
+      select: { id: true, firstName: true, lastName: true },
+    },
+  }
+}
+```
+
+* Kombinasi nested + select:
+
+```url
+https://example.com/?include=posts.comments,profile.select:(id,firstName)
+```
+
+```ts
+{
+  include: {
+    posts: { include: { comments: true } },
+    profile: { select: { id: true, firstName: true } },
+  }
+}
+```
+
+---
+
+### 🔹 WherePipe + OrderByPipe
+
+Kombinasi filter & sort:
+
+```url
+https://example.com/?where=firstName:John&orderBy=firstName:asc
+```

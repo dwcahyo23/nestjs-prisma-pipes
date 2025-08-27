@@ -18,26 +18,37 @@ export default class OrderByPipe implements PipeTransform {
 	 * @throws BadRequestException if the orderBy query parameter is invalid.
 	 */
 	transform(value: string): Pipes.Order | undefined {
-		if (value == null) return undefined;
+		if (value == null || value.trim() === '') return undefined;
 
 		try {
-			const rules = value.split(',').map((val) => val.trim());
+			const rules = value.split(',').map((val) => val.trim()).filter(Boolean);
 			const orderBy: Pipes.Order = {};
 
 			rules.forEach((rule) => {
-				const [key, order] = rule.split(':') as [string, 'asc' | 'desc'];
-				const orderLowerCase = order.trim().toLocaleLowerCase();
+				const [key, order] = rule.split(':').map((s) => s?.trim()) as [
+					string,
+					string | undefined
+				];
 
+				if (!key || !order) {
+					throw new BadRequestException(
+						`Invalid orderBy rule: "${rule}", must be "field:asc|desc"`
+					);
+				}
+
+				const orderLowerCase = order.toLowerCase();
 				if (!['asc', 'desc'].includes(orderLowerCase)) {
 					throw new BadRequestException(`Invalid order: ${orderLowerCase}`);
 				}
+
 				orderBy[key] = orderLowerCase as 'asc' | 'desc';
 			});
 
 			return orderBy;
 		} catch (error) {
-			console.error(error);
+			// console.error(error);
 			throw new BadRequestException('Invalid orderBy query parameter');
 		}
 	}
+
 }

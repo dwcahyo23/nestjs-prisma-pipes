@@ -192,6 +192,20 @@ describe('WherePipe', () => {
 		});
 	});
 
+	it('should parse combination of simple string and nested relation filter', () => {
+		const string = 'boxId: box-001, hseP3kItem.is.type: CONSUMABLE';
+
+		expect(pipe.transform(string)).toEqual({
+			boxId: 'box-001',
+			hseP3kItem: {
+				is: {
+					type: 'CONSUMABLE',
+				},
+			},
+		});
+	});
+
+
 
 	it('should be defined', () => {
 		expect(pipe).toBeDefined();

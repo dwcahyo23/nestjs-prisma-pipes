@@ -180,48 +180,31 @@ export default class WherePipe implements PipeTransform {
 			rules.forEach((rule: any) => {
 				const ruleKey = rule[0];
 				const ruleValue = parseValue(rule[1]);
-				console.log({ value, ruleKey, ruleValue })
 				const data: Record<string, any> = {};
 
 				[
-					'lt',
-					'lte',
-					'gt',
-					'gte',
-					'equals',
-					'not',
-					'contains',
-					'startsWith',
-					'endsWith',
-					'every',
-					'some',
-					'none',
-					'in',
-					'has',
-					'hasEvery',
-					'hasSome',
+					'lt', 'lte', 'gt', 'gte', 'equals', 'not', 'contains', 'startsWith', 'endsWith',
+					'every', 'some', 'none', 'in', 'has', 'hasEvery', 'hasSome',
 				].forEach((val) => {
 					if (rule[1].startsWith(`${val} `) && typeof ruleValue === 'string') {
-
 						data[val] = parseValue(ruleValue.replace(`${val} `, ''));
-
-						items[ruleKey] = data;
-
 					}
 				});
 
 				if (ruleKey.indexOf('.') !== -1) {
-
-					const delimeted = delimetedStringObject(ruleKey, data)
-
-					return items = { ...delimeted }
-
+					const delimeted = delimetedStringObject(
+						ruleKey,
+						Object.keys(data).length > 0 ? data : ruleValue,
+					);
+					// merge hasil nested
+					items = { ...items, ...delimeted };
+					return; // ⬅️ jangan lanjut ke items[ruleKey]
 				}
 
-				if (ruleValue != null && ruleValue !== '') {
-
-					return items[ruleKey] = items[ruleKey] || ruleValue;
-
+				if (Object.keys(data).length > 0) {
+					items[ruleKey] = data;
+				} else if (ruleValue != null && ruleValue !== '') {
+					items[ruleKey] = ruleValue;
 				}
 			});
 

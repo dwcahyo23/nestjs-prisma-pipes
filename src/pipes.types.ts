@@ -1,7 +1,9 @@
 export namespace Pipes {
-  export type Where = Record<string, number | string>;
+	export type Where = Record<string, number | string>;
 
-  export type Order = Record<string, 'asc' | 'desc'>;
+	export type Order = Record<string, 'asc' | 'desc'>;
 
-  export type Select = Record<string, boolean>;
+	export type Select = Record<string, boolean>;
+
+	export type Include = Record<string, any>;
 }
