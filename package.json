@@ -1,28 +1,32 @@
 {
-	"name": "@nodeteam/nestjs-pipes",
-	"version": "1.2.4",
-	"description": "Pipes collection for Nest.JS app",
-	"main": "./dist/src/index.js",
+	"name": "@dwcahyo/nestjs-prisma-pipes",
+	"version": "1.0.0",
+	"description": "NestJS pipes collection for Prisma (forked and improved from @nodeteam/nestjs-prisma-pipes)",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
 	"scripts": {
 		"build": "tsc",
 		"test": "jest",
-		"test:watch": "jest --watch"
+		"test:watch": "jest --watch",
+		"prepublishOnly": "npm run build"
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nodeteamdev/nestjs-pipes.git"
+		"url": "git+https://github.com/dwcahyo23/nestjs-prisma-pipes.git"
 	},
 	"keywords": [
 		"nestjs",
 		"pipes",
-		"prisma"
+		"prisma",
+		"wherepipe",
+		"orderby"
 	],
-	"author": "NodeTeam",
-	"license": "ISC",
+	"author": "Yusuf Dwi",
+	"license": "MIT",
 	"bugs": {
-		"url": "https://github.com/nodeteamdev/nestjs-pipes/issues"
+		"url": "https://github.com/dwcahyo23/nestjs-prisma-pipes/issues"
 	},
-	"homepage": "https://github.com/nodeteamdev/nestjs-pipes#readme",
+	"homepage": "https://github.com/dwcahyo23/nestjs-prisma-pipes#readme",
 	"devDependencies": {
 		"@jest/globals": "^29.7.0",
 		"@types/jest": "^29.5.14",
@@ -31,14 +35,14 @@
 		"cz-conventional-changelog": "^3.3.0",
 		"eslint": "^8.33.0",
 		"eslint-config-airbnb-base": "^15.0.0",
-		"eslint-plugin-import": "^2.27.5"
+		"eslint-plugin-import": "^2.27.5",
+		"ts-jest": "^29.3.2",
+		"typescript": "^5.8.3"
 	},
 	"dependencies": {
 		"@nestjs/common": "^11.0.19",
 		"@nestjs/testing": "^11.0.19",
-		"jest": "^29.7.0",
-		"ts-jest": "^29.3.2",
-		"typescript": "^5.8.3"
+		"jest": "^29.7.0"
 	},
 	"config": {
 		"commitizen": {
