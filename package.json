@@ -5,8 +5,11 @@
 		"access": "public"
 	},
 	"description": "NestJS pipes collection for Prisma (forked and improved from @nodeteam/nestjs-prisma-pipes)",
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
+	"main": "dist/src/index.js",
+	"types": "dist/src/index.d.ts",
+	"files": [
+		"dist"
+	],
 	"scripts": {
 		"build": "tsc",
 		"test": "jest",
