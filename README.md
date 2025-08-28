@@ -11,6 +11,53 @@ Utility pipes untuk **NestJS + Prisma**: parsing query string (`where`, `orderBy
 npm install --save @dwcahyo/nestjs-prisma-pipes
 ```
 
+## 🚀 Usage
+
+Contoh penggunaan di **NestJS Controller**:
+
+```ts
+import { Controller, Get, Query } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+import { Pipes, WherePipe, OrderByPipe, SelectPipe, IncludePipe } from '@dwcahyo/nestjs-prisma-pipes';
+
+@Controller('users')
+export class UserController {
+  constructor(private prisma: PrismaService) {}
+
+  @Get()
+  async findAll(
+    @Query('where', WherePipe) where?: Pipes.Where,
+    @Query('orderBy', OrderByPipe) orderBy?: Pipes.Order,
+    @Query('select', SelectPipe) select?: Pipes.Select,
+    @Query('include', IncludePipe) include?: Pipes.Include,
+  ) {
+    return this.prisma.user.findMany({
+      where,
+      orderBy,
+      select,
+      include,
+    });
+  }
+}
+```
+
+Sekarang kamu bisa langsung query:
+
+```url
+/users?where=firstName:contains string(John)&orderBy=createdAt:desc&select=id,firstName&include=profile
+```
+
+Hasil Prisma query:
+
+```ts
+{
+  where: { firstName: { contains: 'John' } },
+  orderBy: { createdAt: 'desc' },
+  select: { id: true, firstName: true },
+  include: { profile: true }
+}
+```
+
 ---
 
 ## 🔽 Pipes

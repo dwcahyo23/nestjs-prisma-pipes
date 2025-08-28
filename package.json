@@ -6,7 +6,7 @@
 	},
 	"description": "NestJS pipes collection for Prisma (forked and improved from @nodeteam/nestjs-prisma-pipes)",
 	"main": "dist/src/index.js",
-	"types": "dist/src/git .d.ts",
+	"types": "dist/src/index.d.ts",
 	"files": [
 		"dist"
 	],
