@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
 import { Pipes } from 'src/pipes.types';
 import delimetedStringObject from '../helpers/delimeted-string-object';
+import deepMerge from '../helpers/deep-merge';
 
 /**
  * @description Parse a string to an integer
@@ -197,7 +198,7 @@ export default class WherePipe implements PipeTransform {
 						Object.keys(data).length > 0 ? data : ruleValue,
 					);
 					// merge hasil nested
-					items = { ...items, ...delimeted };
+					items = deepMerge(items, delimeted);
 					return; // ⬅️ jangan lanjut ke items[ruleKey]
 				}
 
