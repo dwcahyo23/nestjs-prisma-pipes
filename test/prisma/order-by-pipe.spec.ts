@@ -55,6 +55,52 @@ describe('Order by pipe', () => {
 		}
 	});
 
+	it('should handle single-level nested key like "user.name:asc"', () => {
+		const value = 'user.name:asc';
+		const result = pipe.transform(value);
+		expect(result).toEqual({
+			user: {
+				name: 'asc',
+			},
+		});
+	});
+
+	it('should handle multi-level nested key like "user.profile.name:desc"', () => {
+		const value = 'user.profile.name:desc';
+		const result = pipe.transform(value);
+		expect(result).toEqual({
+			user: {
+				profile: {
+					name: 'desc',
+				},
+			},
+		});
+	});
+
+	it('should handle multiple nested keys like "user.profile.name:asc,posts.comments.createdAt:desc"', () => {
+		const value = 'user.profile.name:asc,posts.comments.createdAt:desc';
+		const result = pipe.transform(value);
+		expect(result).toEqual({
+			user: {
+				profile: {
+					name: 'asc',
+				},
+			},
+			posts: {
+				comments: {
+					createdAt: 'desc',
+				},
+			},
+		});
+	});
+
+	it('should throw error on conflicting nested key', () => {
+		// first rule makes user = "asc", second rule tries to make it an object
+		const value = 'user:asc,user.profile.name:desc';
+		expect(() => pipe.transform(value)).toThrow();
+	});
+
+
 	it('should be defined', () => {
 		expect(pipe).toBeDefined();
 	});

@@ -1,7 +1,8 @@
 # 🛠 @dwcahyo/nestjs-prisma-pipes
 
-**NestJS + Prisma Pipes** — Parse query strings (`where`, `orderBy`, `select`, `include`) directly into **Prisma query objects**.
-No more manual parsing! Just send queries from URL and get ready-to-use Prisma objects.
+**NestJS + Prisma query pipes**  
+Parse query strings (`where`, `orderBy`, `select`, `include`) directly into **Prisma-ready objects**.  
+No more manual parsing — just pass query params, and you're good to go 🚀
 
 ---
 
@@ -13,7 +14,22 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
 
 ---
 
+# 📜 Changelog
+
+## \[2.0.4]
+
+### Added
+
+- Support for **nested `orderBy`** (multi-level deep ordering).
+  Example:
+
+  ```url
+  ?orderBy=user.profile.name:asc,posts.comments.createdAt:desc
+  ```
+
 ## 🚀 Quick Start
+
+Use pipes in your controller to transform query parameters automatically:
 
 ```ts
 import { Controller, Get, Query } from "@nestjs/common";
@@ -37,115 +53,228 @@ export class UserController {
     @Query("select", SelectPipe) select?: Pipes.Select,
     @Query("include", IncludePipe) include?: Pipes.Include
   ) {
-    return this.prisma.user.findMany({
-      where,
-      orderBy,
-      select,
-      include,
-    });
+    return this.prisma.user.findMany({ where, orderBy, select, include });
   }
 }
 ```
 
 ---
 
-## 🔗 Example Query
+## 🔎 Pipes Overview
 
-```url
-/users?where=firstName:contains string(John)&orderBy=createdAt:desc&select=id,firstName&include=profile
-```
-
-**Generated Prisma query:**
-
-```ts
-{
-  where: { firstName: { contains: 'John' } },
-  orderBy: { createdAt: 'desc' },
-  select: { id: true, firstName: true },
-  include: { profile: true }
-}
-```
-
----
-
-## 🔽 Pipes Overview
-
-| Pipe          | Description                                      |
-| ------------- | ------------------------------------------------ |
-| `WherePipe`   | Parse `where` filters including nested relations |
-| `OrderByPipe` | Parse `orderBy` filters                          |
-| `SelectPipe`  | Select specific fields/columns                   |
-| `IncludePipe` | Include relations with optional nested selects   |
+| Pipe          | Purpose                                                       |
+| ------------- | ------------------------------------------------------------- |
+| `WherePipe`   | Parse `where` filters (supports operators & nested relations) |
+| `OrderByPipe` | Parse `orderBy` filters (supports deep nesting)               |
+| `SelectPipe`  | Pick specific fields to return                                |
+| `IncludePipe` | Include relations (with nested `select`)                      |
 
 ---
 
 ## 1️⃣ WherePipe
 
-Transform query string to **Prisma where filter**.
+Convert query strings into **Prisma `where` objects** with support for operators, nested relations, and type casting.
 
 ```ts
-@Query('where', WherePipe) where?: Pipes.Where
+@Query("where", WherePipe) where?: Pipes.Where
 ```
 
-### Supported Operators
+---
 
-- Comparison: `equals`, `not`, `lt`, `lte`, `gt`, `gte`
-- Text: `contains`, `startsWith`, `endsWith`
-- Array: `has`, `hasEvery`, `hasSome`
-- Relations: `is`, `some`, `every`, `none`
+### 🔧 Supported Operators
 
-### Example
+| Type       | Operators                                 | Example                                          |
+| ---------- | ----------------------------------------- | ------------------------------------------------ |
+| Comparison | `equals`, `not`, `lt`, `lte`, `gt`, `gte` | `?where=age:gt int(18)`                          |
+| Text       | `contains`, `startsWith`, `endsWith`      | `?where=name:contains string(John)`              |
+| Arrays     | `has`, `hasEvery`, `hasSome`, `in`        | `?where=id:in array(int(1),int(2))`              |
+| Relations  | `is`, `some`, `every`, `none`             | `?where=posts.some.title:contains string(Hello)` |
+
+---
+
+### 🔢 Supported Value Types
+
+| Type    | Syntax                            | Example                                           |
+| ------- | --------------------------------- | ------------------------------------------------- |
+| String  | `string(value)`                   | `string(John)` → `"John"`                         |
+| Integer | `int(value)`                      | `int(42)` → `42`                                  |
+| Float   | `float(value)`                    | `float(3.14)` → `3.14`                            |
+| Boolean | `boolean(value)` / `bool(value)`  | `bool(true)` → `true`                             |
+| Date    | `date(value)` / `datetime(value)` | `date(2025-01-01)` → `"2025-01-01T00:00:00.000Z"` |
+| Array   | `array(type(...))`                | `array(int(1),int(2))` → `[1,2]`                  |
+
+---
+
+### 🧩 Examples
+
+#### Flat Filter
 
 ```url
 ?where=firstName:contains string(John)
+```
+
+```ts
+{
+  firstName: {
+    contains: "John";
+  }
+}
+```
+
+#### Comparison
+
+```url
 ?where=age:gt int(18)
+```
+
+```ts
+{
+  age: {
+    gt: 18;
+  }
+}
+```
+
+#### Nested Relation
+
+```url
 ?where=posts.some.title:contains string(Hello)
+```
+
+```ts
+{
+  posts: {
+    some: {
+      title: {
+        contains: "Hello";
+      }
+    }
+  }
+}
+```
+
+#### Multi-Nested Condition
+
+```url
+?where=company.departments.every.employees.some.name:startsWith string(A)
+```
+
+```ts
+{
+  company: {
+    departments: {
+      every: {
+        employees: {
+          some: {
+            name: {
+              startsWith: "A";
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+#### Array Condition
+
+```url
+?where=id:in array(int(1),int(2),int(3))
+```
+
+```ts
+{ id: { in: [1, 2, 3] } }
 ```
 
 ---
 
 ## 2️⃣ OrderByPipe
 
-Transform query string to **Prisma order filter**.
+Convert query strings into **Prisma `orderBy` objects**.
 
 ```ts
 @Query('orderBy', OrderByPipe) orderBy?: Pipes.Order
 ```
 
-**Example:**
+### 🧩 Examples
+
+### Flat Order
 
 ```url
 ?orderBy=createdAt:desc
+```
+
+```ts
+{
+  createdAt: "desc";
+}
+```
+
+### Nested Order
+
+```url
+?orderBy=user.profile.name:asc
+```
+
+```ts
+{
+  user: {
+    profile: {
+      name: "asc";
+    }
+  }
+}
+```
+
+### Multi-Nested Order
+
+```url
+?orderBy=user.profile.name:asc,posts.comments.createdAt:desc
+```
+
+```ts
+{
+  user: { profile: { name: 'asc' } },
+  posts: { comments: { createdAt: 'desc' } }
+}
 ```
 
 ---
 
 ## 3️⃣ SelectPipe
 
-Select only specific fields.
+Pick which fields to return.
 
 ```ts
 @Query('select', SelectPipe) select?: Pipes.Select
 ```
 
-**Examples:**
+### 🧩 Examples
 
 ```url
 ?select=id,firstName,lastName
 ?select=-password
 ```
 
+```ts
+{ id: true, firstName: true, lastName: true }
+{ password: false }
+```
+
 ---
 
 ## 4️⃣ IncludePipe
 
-Include related models, with **optional nested select**.
+Include relations, with optional **nested includes & selects**.
 
 ```ts
 @Query('include', IncludePipe) include?: Pipes.Include
 ```
 
-### Simple Include
+### 🧩 Examples
+
+### Basic Include
 
 ```url
 ?include=profile
@@ -183,42 +312,10 @@ Include related models, with **optional nested select**.
 { profile: { select: { id: true, firstName: true, lastName: true } } }
 ```
 
-### Nested Include + Select
+### Multi-Nested Include
 
 ```url
-?include=posts.comments,profile.select:(id,firstName)
-```
-
-```ts
-{
-  posts: { include: { comments: true } },
-  profile: { select: { id: true, firstName: true } }
-}
-```
-
-### Multi-Nested Select + Include
-
-```url
-?include=profile.select:(id,firstName,account.select:(password,email)),posts.comments
-```
-
-```ts
-{
-  profile: {
-    select: {
-      id: true,
-      firstName: true,
-      account: { select: { password: true, email: true } }
-    }
-  },
-  posts: { include: { comments: true } }
-}
-```
-
-### Deep Multi-Level Nested Include
-
-```url
-?include=company.departments.select:(name,employees.select:(id,name,manager.select:(id)))
+?include=company.departments.select:(name,employees.select:(id,name))
 ```
 
 ```ts
@@ -228,13 +325,7 @@ Include related models, with **optional nested select**.
       departments: {
         select: {
           name: true,
-          employees: {
-            select: {
-              id: true,
-              name: true,
-              manager: { select: { id: true } }
-            }
-          }
+          employees: { select: { id: true, name: true } }
         }
       }
     }
@@ -244,17 +335,47 @@ Include related models, with **optional nested select**.
 
 ---
 
-## 5️⃣ Combine Where + OrderBy
+## 5️⃣ Combined Example
 
 ```url
-?where=firstName:John&orderBy=firstName:asc
+/users?where=firstName:contains string(John)&orderBy=user.profile.name:asc&select=id,firstName&include=profile
+```
+
+```ts
+{
+  where: { firstName: { contains: 'John' } },
+  orderBy: { user: { profile: { name: 'asc' } } },
+  select: { id: true, firstName: true },
+  include: { profile: true }
+}
 ```
 
 ---
 
-## 💡 Tips
+## 💡 Pro Tips
 
-- Nested select works **arbitrarily deep**
-- Mix `include` and `select` freely
-- Pipes handle empty / undefined queries gracefully
-- Perfect for **dynamic filters from frontend**
+- All pipes handle **empty / undefined query params** gracefully.
+- `where`, `orderBy`, `select`, and `include` all support **deep nesting**.
+- Mix `select` and `include` freely to shape your response.
+- Perfect for building **dynamic, frontend-driven filters**.
+
+---
+
+## 🗺 Roadmap – Next Pipes
+
+These are the upcoming pipes planned for future releases:
+
+| Pipe             | Description                                                                | Status      |
+| ---------------- | -------------------------------------------------------------------------- | ----------- |
+| `DistinctPipe`   | Parse `distinct` query param into Prisma `distinct` array                  | 🟡 Planned  |
+| `PaginationPipe` | Parse `skip` & `take` (or `page` & `limit`) into Prisma pagination options | 🟡 Planned  |
+| `GroupByPipe`    | Parse `groupBy` queries into Prisma `groupBy` options (with aggregates)    | 🔵 Research |
+| `HavingPipe`     | Support SQL-like `having` filters after grouping                           | 🔵 Research |
+| `CountPipe`      | Shortcut to request `count` results alongside data                         | 🟡 Planned  |
+| `AggregatePipe`  | Parse aggregate queries (`_sum`, `_avg`, `_min`, `_max`) into Prisma query | 🔵 Research |
+
+✅ Already Available: `WherePipe`, `OrderByPipe`, `SelectPipe`, `IncludePipe`
+
+---
+
+✨ With `@dwcahyo/nestjs-prisma-pipes`, you write **less boilerplate** and let your users build **powerful dynamic queries** right from the URL.
