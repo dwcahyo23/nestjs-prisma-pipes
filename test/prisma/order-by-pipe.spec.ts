@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import OrderByPipe from '../../src/prisma/order-by.pipe';
 
-describe('Order by pipe', () => {
+describe('OrderByPipe', () => {
 	let pipe: OrderByPipe;
 
 	beforeEach(async () => {
@@ -12,22 +12,22 @@ describe('Order by pipe', () => {
 		pipe = moduleRef.get<OrderByPipe>(OrderByPipe);
 	});
 
-	it('should convert value like "name:asc, address:desc" to { name: "asc", address: "desc" }', () => {
+	it('should convert "name:asc, address:desc" to array format', () => {
 		const value = 'name:asc, address:desc';
 		const result = pipe.transform(value);
-		expect(result).toEqual({
-			address: 'desc',
-			name: 'asc',
-		});
+		expect(result).toEqual([
+			{ name: 'asc' },
+			{ address: 'desc' },
+		]);
 	});
 
-	it('should convert values correctly when input contains a space before "asc" or "desc" ("name: asc, address: desc")', () => {
+	it('should handle spaces around rules', () => {
 		const value = 'name: asc, address: desc';
 		const result = pipe.transform(value);
-		expect(result).toEqual({
-			name: 'asc',
-			address: 'desc',
-		});
+		expect(result).toEqual([
+			{ name: 'asc' },
+			{ address: 'desc' },
+		]);
 	});
 
 	it('should return undefined if value is empty', () => {
@@ -36,23 +36,36 @@ describe('Order by pipe', () => {
 		expect(result).toBeUndefined();
 	});
 
-	it('should return values to lower case', () => {
-		expect.assertions(1);
+	it('should normalize order direction to lowercase', () => {
 		const value = 'name:ASC, address:DESC';
 		const result = pipe.transform(value);
-		expect(result).toEqual({
-			address: 'desc',
-			name: 'asc',
-		});
+		expect(result).toEqual([
+			{ name: 'asc' },
+			{ address: 'desc' },
+		]);
 	});
 
-	it('should throw an error if params not arc & desc', () => {
+	it('should throw an error for invalid order direction', () => {
 		const value = 'name:name, address:address';
-		try {
-			pipe.transform(value);
-		} catch (e) {
-			expect(e).toBeTruthy();
-		}
+		expect(() => pipe.transform(value)).toThrow();
+	});
+
+	it('should support nested relation fields like "profile.bio:desc"', () => {
+		const value = 'profile.bio:desc';
+		const result = pipe.transform(value);
+		expect(result).toEqual([
+			{ profile: { bio: 'desc' } },
+		]);
+	});
+
+	it('should support multiple nested order rules', () => {
+		const value = 'name:asc, profile.bio:desc, company.department.name:asc';
+		const result = pipe.transform(value);
+		expect(result).toEqual([
+			{ name: 'asc' },
+			{ profile: { bio: 'desc' } },
+			{ company: { department: { name: 'asc' } } },
+		]);
 	});
 
 	it('should be defined', () => {

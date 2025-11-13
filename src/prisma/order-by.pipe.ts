@@ -6,25 +6,26 @@ import {
 import { Pipes } from 'src/pipes.types';
 
 /**
- * OrderByPipe is a PipeTransform implementation used to validate and parse
- * the orderBy query parameter.
+ * Parses ?orderBy=name:asc,profile.bio:desc into:
+ * [
+ *   { name: 'asc' },
+ *   { profile: { bio: 'desc' } }
+ * ]
  */
 @Injectable()
 export default class OrderByPipe implements PipeTransform {
-	/**
-	 * Validates and parses the orderBy query parameter.
-	 * @param value The orderBy query parameter.
-	 * @returns The parsed orderBy query parameter.
-	 * @throws BadRequestException if the orderBy query parameter is invalid.
-	 */
-	transform(value: string): Pipes.Order | undefined {
-		if (value == null || value.trim() === '') return undefined;
+	transform(value: string): Pipes.Order[] | undefined {
+		if (!value || value.trim() === '') return undefined;
 
 		try {
-			const rules = value.split(',').map((val) => val.trim()).filter(Boolean);
-			const orderBy: Pipes.Order = {};
+			const rules = value
+				.split(',')
+				.map((val) => val.trim())
+				.filter(Boolean);
 
-			rules.forEach((rule) => {
+			const orderBy: Pipes.Order[] = [];
+
+			for (const rule of rules) {
 				const [key, order] = rule.split(':').map((s) => s?.trim()) as [
 					string,
 					string | undefined
@@ -36,19 +37,34 @@ export default class OrderByPipe implements PipeTransform {
 					);
 				}
 
-				const orderLowerCase = order.toLowerCase();
-				if (!['asc', 'desc'].includes(orderLowerCase)) {
-					throw new BadRequestException(`Invalid order: ${orderLowerCase}`);
+				const orderLower = order.toLowerCase();
+				if (!['asc', 'desc'].includes(orderLower)) {
+					throw new BadRequestException(
+						`Invalid order direction: ${orderLower}`
+					);
 				}
 
-				orderBy[key] = orderLowerCase as 'asc' | 'desc';
-			});
+				// Support for nested relation e.g. profile.bio
+				const keys = key.split('.');
+				let nested: any = {};
+				let current = nested;
+
+				for (let i = 0; i < keys.length; i++) {
+					const k = keys[i];
+					if (i === keys.length - 1) {
+						current[k] = orderLower;
+					} else {
+						current[k] = {};
+						current = current[k];
+					}
+				}
+
+				orderBy.push(nested);
+			}
 
 			return orderBy;
-		} catch (error) {
-			// console.error(error);
+		} catch {
 			throw new BadRequestException('Invalid orderBy query parameter');
 		}
 	}
-
 }
