@@ -5,13 +5,7 @@ import {
 } from '@nestjs/common';
 import { Pipes } from 'src/pipes.types';
 
-/**
- * Parses ?orderBy=name:asc,profile.bio:desc into:
- * [
- *   { name: 'asc' },
- *   { profile: { bio: 'desc' } }
- * ]
- */
+
 @Injectable()
 export default class OrderByPipe implements PipeTransform {
 	transform(value: string): Pipes.Order[] | undefined {

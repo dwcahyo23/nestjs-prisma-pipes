@@ -205,6 +205,54 @@ describe('WherePipe', () => {
 		});
 	});
 
+	it('should parse multi-nested object correctly', () => {
+		const string = 'hseAparRevision.unit.location.city: string(Jakarta), hseAparRevision.unit.location.country: string(ID), hseAparRevision.version: int(2)';
+
+		expect(pipe.transform(string)).toEqual({
+			hseAparRevision: {
+				version: 2,
+				unit: {
+					location: {
+						city: 'Jakarta',
+						country: 'ID',
+					},
+				},
+			},
+		});
+	});
+
+	it('should parse multi-object with different roots', () => {
+		const string = 'hseAparRevision.version: int(2), schedule.every: boolean(true), unit.name: string(Unit A), unit.location: string(Jakarta)';
+
+		expect(pipe.transform(string)).toEqual({
+			hseAparRevision: {
+				version: 2,
+			},
+			schedule: {
+				every: true,
+			},
+			unit: {
+				name: 'Unit A',
+				location: 'Jakarta',
+			},
+		});
+	});
+
+	it('should parse combination of simple and deeply nested values', () => {
+		const string = 'id: int(5), hseAparRevision.unit.location.city: string(Surabaya), hseAparRevision.masterAparId: string(123-uuid)';
+
+		expect(pipe.transform(string)).toEqual({
+			id: 5,
+			hseAparRevision: {
+				masterAparId: '123-uuid',
+				unit: {
+					location: {
+						city: 'Surabaya',
+					},
+				},
+			},
+		});
+	});
 
 
 	it('should be defined', () => {
