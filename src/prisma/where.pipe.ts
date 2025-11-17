@@ -5,209 +5,225 @@ import delimetedStringObject from '../helpers/delimeted-string-object';
 import deepMerge from '../helpers/deep-merge';
 
 /**
- * @description Parse a string to an integer
- * @param {string} ruleValue - The string to be parsed
- * @returns {number} The parsed integer
+ * Type definitions for better type safety
  */
-const parseStringToInt = (ruleValue: string): number => {
-	if (!ruleValue.endsWith(')')) {
-		return 0;
-	}
+type PrimitiveValue = string | number | boolean;
+type ParsedValue = PrimitiveValue | PrimitiveValue[] | Record<string, any>;
 
-	if (!ruleValue.startsWith('int(')) {
-		return 0;
-	}
+/**
+ * Operators supported by the where pipe
+ */
+const FILTER_OPERATORS = [
+	'lt', 'lte', 'gt', 'gte', 'equals', 'not',
+	'contains', 'startsWith', 'endsWith',
+	'every', 'some', 'none',
+	'in', 'has', 'hasEvery', 'hasSome',
+] as const;
 
-	const arr = /\(([^)]+)\)/.exec(ruleValue);
+type FilterOperator = typeof FILTER_OPERATORS[number];
 
-	if (!arr || !arr[1]) {
-		return 0;
-	}
-
-	return parseInt(arr[1], 10);
+/**
+ * Type parsers registry for better extensibility
+ */
+const TYPE_PARSERS: Record<string, (value: string) => ParsedValue> = {
+	int: parseStringToInt,
+	date: parseStringToDate,
+	datetime: parseStringToDate,
+	float: parseStringToFloat,
+	string: parseStringToString,
+	boolean: parseStringToBoolean,
+	bool: parseStringToBoolean,
+	array: parseStringToArray,
 };
 
 /**
- * @description Parse a string to a date
- * @param {string} ruleValue - The string to be parsed
- * @returns {string} The parsed date in ISO format
+ * Extract value from parentheses
  */
-const parseStringToDate = (ruleValue: string): string => {
-	if (!ruleValue.endsWith(')')) {
-		return '';
-	}
-
-	if (!ruleValue.startsWith('date(') && !ruleValue.startsWith('datetime(')) {
-		return '';
-	}
-
-	const arr = /\(([^)]+)\)/.exec(ruleValue);
-
-	if (!arr || !arr[1]) {
-		return '';
-	}
-
-	return new Date(arr[1]).toISOString();
-};
+function extractParenthesesContent(input: string): string | null {
+	const match = /\(([^)]+)\)/.exec(input);
+	return match ? match[1] : null;
+}
 
 /**
- * @description Parse a string to a float
- * @param {string} ruleValue - The string to be parsed
- * @returns {number} The parsed float
+ * Parse a string to an integer
  */
-const parseStringToFloat = (ruleValue: string): number => {
-	if (!ruleValue.endsWith(')')) {
+function parseStringToInt(ruleValue: string): number {
+	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('int(')) {
 		return 0;
 	}
-
-	if (!ruleValue.startsWith('float(')) {
-		return 0;
-	}
-
-	const arr = /\(([^)]+)\)/.exec(ruleValue);
-
-	if (!arr || !arr[1]) {
-		return 0;
-	}
-
-	return parseFloat(arr[1]);
-};
+	const content = extractParenthesesContent(ruleValue);
+	return content ? parseInt(content, 10) : 0;
+}
 
 /**
- * @description Parse a string to a string
- * @param {string} ruleValue - The string to be parsed
- * @returns {string} The parsed string
+ * Parse a string to a date
  */
-const parseStringToString = (ruleValue: string): string => {
-	if (!ruleValue.endsWith(')')) {
+function parseStringToDate(ruleValue: string): string {
+	const validPrefixes = ['date(', 'datetime('];
+	const hasValidPrefix = validPrefixes.some(prefix => ruleValue.startsWith(prefix));
+
+	if (!ruleValue.endsWith(')') || !hasValidPrefix) {
 		return '';
 	}
 
-	if (!ruleValue.startsWith('string(')) {
-		return '';
-	}
-
-	const arr = /\(([^)]+)\)/.exec(ruleValue);
-
-	if (!arr || !arr[1]) {
-		return '';
-	}
-
-	return arr[1];
-};
+	const content = extractParenthesesContent(ruleValue);
+	return content ? new Date(content).toISOString() : '';
+}
 
 /**
- * @description Parse a string to a boolean
- * @param {string} ruleValue - The string to be parsed
- * @returns {boolean} The parsed boolean
+ * Parse a string to a float
  */
-const parseStringToBoolean = (ruleValue: string): boolean => {
-	if (!ruleValue.endsWith(')')) {
+function parseStringToFloat(ruleValue: string): number {
+	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('float(')) {
+		return 0;
+	}
+	const content = extractParenthesesContent(ruleValue);
+	return content ? parseFloat(content) : 0;
+}
+
+/**
+ * Parse a string to a string
+ */
+function parseStringToString(ruleValue: string): string {
+	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('string(')) {
+		return '';
+	}
+	return extractParenthesesContent(ruleValue) || '';
+}
+
+/**
+ * Parse a string to a boolean
+ */
+function parseStringToBoolean(ruleValue: string): boolean {
+	const validPrefixes = ['boolean(', 'bool('];
+	const hasValidPrefix = validPrefixes.some(prefix => ruleValue.startsWith(prefix));
+
+	if (!ruleValue.endsWith(')') || !hasValidPrefix) {
 		return false;
 	}
 
-	if (!ruleValue.startsWith('boolean(') && !ruleValue.startsWith('bool(')) {
-		return false;
-	}
-
-	const arr = /\(([^)]+)\)/.exec(ruleValue);
-
-	if (!arr || !arr[1]) {
-		return false;
-	}
-
-	return arr[1] === 'true';
-};
+	const content = extractParenthesesContent(ruleValue);
+	return content === 'true';
+}
 
 /**
- * @description Parse a string to a value
- * @param {string} ruleValue - The string to be parsed
- * @returns {string | number | boolean | object} The parsed value
+ * Parse a string to an array
  */
-const parseValue = (ruleValue: string): string | number | boolean | object => {
-	if (ruleValue.startsWith('array(')) {
-		const validRegExec = /\(([^]+)\)/.exec(ruleValue);
+function parseStringToArray(ruleValue: string): PrimitiveValue[] {
+	if (!ruleValue.startsWith('array(')) {
+		return [];
+	}
 
-		if (validRegExec) {
-			return validRegExec[1]
-				.split(',')
-				.map((value) => {
-					switch (true) {
-						case value.startsWith('int('):
-							return parseStringToInt(value);
-						case value.startsWith('date(') || value.startsWith('datetime('):
-							return parseStringToDate(value);
-						case value.startsWith('float('):
-							return parseStringToFloat(value);
-						case value.startsWith('string('):
-							return parseStringToString(value);
-						case value.startsWith('boolean(') || value.startsWith('bool('):
-							return parseStringToBoolean(value);
-						default:
-							return value;
-					}
-				});
+	const match = /\(([^]+)\)/.exec(ruleValue);
+	if (!match || !match[1]) {
+		return [];
+	}
+
+	return match[1].split(',').map((value) => {
+		const trimmedValue = value.trim();
+		return parseValue(trimmedValue) as PrimitiveValue;
+	});
+}
+
+/**
+ * Detect type from string and parse accordingly
+ */
+function parseValue(ruleValue: string): ParsedValue {
+	// Check for typed values
+	for (const [type, parser] of Object.entries(TYPE_PARSERS)) {
+		if (ruleValue.startsWith(`${type}(`)) {
+			return parser(ruleValue);
 		}
 	}
 
-	switch (true) {
-		case ruleValue.startsWith('int('):
-			return parseStringToInt(ruleValue);
-		case ruleValue.startsWith('date(') || ruleValue.startsWith('datetime('):
-			return parseStringToDate(ruleValue);
-		case ruleValue.startsWith('float('):
-			return parseStringToFloat(ruleValue);
-		case ruleValue.startsWith('string('):
-			return parseStringToString(ruleValue);
-		case ruleValue.startsWith('boolean(') || ruleValue.startsWith('bool('):
-			return parseStringToBoolean(ruleValue);
-		default:
-			return ruleValue;
+	// Return as-is if no type detected
+	return ruleValue;
+}
+
+/**
+ * Extract operator and value from a rule
+ */
+function extractOperatorAndValue(ruleValue: string): { operator: string | null; value: string } {
+	for (const operator of FILTER_OPERATORS) {
+		if (ruleValue.startsWith(`${operator} `)) {
+			return {
+				operator,
+				value: ruleValue.slice(operator.length).trim(),
+			};
+		}
 	}
-};
+
+	return { operator: null, value: ruleValue };
+}
+
+/**
+ * Process a single rule and return the parsed data
+ */
+function processRule(ruleKey: string, ruleValue: string): { key: string; value: ParsedValue } {
+	const { operator, value } = extractOperatorAndValue(ruleValue);
+
+	if (operator) {
+		return {
+			key: ruleKey,
+			value: { [operator]: parseValue(value) },
+		};
+	}
+
+	return {
+		key: ruleKey,
+		value: parseValue(value),
+	};
+}
+
+/**
+ * Merge multiple rules with the same key (for date ranges, etc.)
+ */
+function mergeRules(items: Record<string, any>, key: string, value: ParsedValue): void {
+	if (key.includes('.')) {
+		// Handle nested keys
+		const nestedObject = delimetedStringObject(key, value);
+		Object.assign(items, deepMerge(items, nestedObject));
+	} else if (items[key] && typeof items[key] === 'object' && typeof value === 'object') {
+		// Merge objects (for date ranges, multiple operators on same field)
+		items[key] = { ...items[key], ...value };
+	} else {
+		// Simple assignment
+		items[key] = value;
+	}
+}
 
 /**
  * @description Convert a string like
  * @example "id: int(1), firstName: banana" to { id: 1, firstName: "banana" }
- * */
+ * @example "createdAt: gte date(2024-01-01), createdAt: lte date(2024-12-31)" 
+ *          to { createdAt: { gte: "2024-01-01T00:00:00.000Z", lte: "2024-12-31T00:00:00.000Z" } }
+ */
 @Injectable()
 export default class WherePipe implements PipeTransform {
 	transform(value: string): Pipes.Where | undefined {
-		if (value == null) return undefined;
+		if (value == null || value === '') {
+			return {};
+		}
+
 		try {
 			const rules = parseObjectLiteral(value);
-			let items: Record<string, any> = {};
+			const items: Record<string, any> = {};
 
-			rules.forEach((rule: any) => {
-				const ruleKey = rule[0];
-				const ruleValue = parseValue(rule[1]);
-				const data: Record<string, any> = {};
+			for (const rule of rules) {
+				const [ruleKey, ruleValue] = rule;
 
-				[
-					'lt', 'lte', 'gt', 'gte', 'equals', 'not', 'contains', 'startsWith', 'endsWith',
-					'every', 'some', 'none', 'in', 'has', 'hasEvery', 'hasSome',
-				].forEach((val) => {
-					if (rule[1].startsWith(`${val} `) && typeof ruleValue === 'string') {
-						data[val] = parseValue(ruleValue.replace(`${val} `, ''));
-					}
-				});
-
-				if (ruleKey.indexOf('.') !== -1) {
-					const delimeted = delimetedStringObject(
-						ruleKey,
-						Object.keys(data).length > 0 ? data : ruleValue,
-					);
-					// merge hasil nested
-					items = deepMerge(items, delimeted);
-					return; // ⬅️ jangan lanjut ke items[ruleKey]
+				// Skip empty values
+				if (ruleValue == null || ruleValue === '') {
+					continue;
 				}
 
-				if (Object.keys(data).length > 0) {
-					items[ruleKey] = data;
-				} else if (ruleValue != null && ruleValue !== '') {
-					items[ruleKey] = ruleValue;
+				const { key, value: processedValue } = processRule(ruleKey, ruleValue);
+
+				// Only add non-empty values
+				if (processedValue != null && processedValue !== '') {
+					mergeRules(items, key, processedValue);
 				}
-			});
+			}
 
 			return items;
 		} catch (error) {
