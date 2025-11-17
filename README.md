@@ -16,6 +16,11 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
 
 # 📜 Changelog
 
+## [2.2.1]
+
+### Added
+- **Field-to-field helper** --Helper to returns a special format for field references that must be converted in service layer before passing to Prima
+
 ## [2.2.0]
 
 ### Added
@@ -205,35 +210,79 @@ Convert query strings into **Prisma `where` objects** with support for operators
 
 ### 🔄 Field-to-Field Comparison
 
-**NEW in v2.2.0**: Compare values between columns in the same table! This is incredibly useful for:
+**NEW in v2.2.1**: Compare values between columns in the same table! This is incredibly useful for:
 - Inventory management (quantity vs recommended quantity)
 - Date validation (start date vs end date)
 - Price ranges (min price vs max price)
 - Business logic filters (actual vs target values)
 
-#### Basic Field Comparison
+#### ⚠️ Important: Service Layer Conversion Required
 
-```url
-?where=qty:lte field(recQty)
+WherePipe returns a special format for field references that **must be converted** in your service layer before passing to Prisma.
+
+**Step 1: Import the helper**
+```typescript
+// Copy field-ref-converter.helper.ts to your project
+import { convertFieldReferences } from '@dwcahyo/nestjs-prisma-pipes';
 ```
 
-```ts
-{
-  qty: {
-    lte: "recQty" // Compare qty with recQty column
+**Step 2: Use in your service**
+```typescript
+@Injectable()
+export class YourService {
+  constructor(private prisma: PrismaService) {}
+
+  async findMany(
+    @Query('where', WherePipe) whereFromPipe?: Pipes.Where
+  ) {
+    // Convert field references before passing to Prisma
+    const where = convertFieldReferences(whereFromPipe, this.prisma.yourModel);
+    
+    return this.prisma.yourModel.findMany({ where });
   }
 }
 ```
 
-**Prisma equivalent:**
+#### Basic Field Comparison
+
+**Query:**
+```url
+?where=qty:lte field(recQty)
+```
+
+**Pipe Output:**
 ```ts
-prisma.item.findMany({
-  where: {
-    qty: {
-      lte: prisma.item.fields.recQty
-    }
+{
+  qty: {
+    lte: { _ref: "recQty", _isFieldRef: true }
   }
-})
+}
+```
+
+**After Conversion:**
+```ts
+{
+  qty: {
+    lte: prisma.marketingSPB.fields.recQty
+  }
+}
+```
+
+**Full Example:**
+```typescript
+// Controller
+@Get()
+async findAll(@Query('where', WherePipe) where?: Pipes.Where) {
+  return this.service.findAll(where);
+}
+
+// Service
+import { convertFieldReferences } from '@dwcahyo/nestjs-prisma-pipes';
+
+async findAll(whereFromPipe: any) {
+  const where = convertFieldReferences(whereFromPipe, this.prisma.marketingSPB);
+  return this.prisma.marketingSPB.findMany({ where });
+}
 ```
 
 #### Date Field Comparison
@@ -243,9 +292,10 @@ prisma.item.findMany({
 ```
 
 ```ts
+// After conversion
 {
   startDate: {
-    lt: "endDate"
+    lt: prisma.event.fields.endDate
   }
 }
 ```
@@ -257,29 +307,16 @@ prisma.item.findMany({
 ```
 
 ```ts
+// After conversion
 {
   qty: {
-    lte: "recQty"
+    lte: prisma.product.fields.recQty
   },
   startDate: {
-    lt: "endDate"
+    lt: prisma.event.fields.endDate
   },
   minPrice: {
-    lte: "maxPrice"
-  }
-}
-```
-
-#### Nested Field References
-
-```url
-?where=balance:gte field(user.minBalance)
-```
-
-```ts
-{
-  balance: {
-    gte: "user.minBalance"
+    lte: prisma.product.fields.maxPrice
   }
 }
 ```
@@ -291,9 +328,10 @@ prisma.item.findMany({
 ```
 
 ```ts
+// After conversion
 {
   qty: {
-    lte: "recQty"
+    lte: prisma.product.fields.recQty
   },
   status: "active",
   price: {
@@ -311,6 +349,33 @@ All comparison operators work with field references:
 - `lte` - Field A less than or equal to Field B
 - `gt` - Field A greater than Field B
 - `gte` - Field A greater than or equal to Field B
+
+#### Helper Function: convertFieldReferences
+
+```typescript
+/**
+ * field-ref-converter.helper.ts
+ */
+export function convertFieldReferences(obj: any, modelDelegate: any): any {
+  // Recursively converts { _ref: 'fieldName', _isFieldRef: true }
+  // to prisma.model.fields.fieldName
+  
+  // See full implementation in artifacts
+}
+
+// Optional: Create a reusable converter
+import { createFieldRefConverter } from '@dwcahyo/nestjs-prisma-pipes';
+
+@Injectable()
+export class YourService {
+  private convertWhere = createFieldRefConverter(this.prisma.yourModel);
+
+  async findMany(whereFromPipe: any) {
+    const where = this.convertWhere(whereFromPipe);
+    return this.prisma.yourModel.findMany({ where });
+  }
+}
+```
 
 ---
 

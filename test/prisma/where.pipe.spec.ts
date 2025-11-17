@@ -273,7 +273,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('qty: lte field(recQty)');
 			expect(result).toEqual({
 				qty: {
-					lte: 'recQty',
+					lte: { _ref: 'recQty', _isFieldRef: true },
 				},
 			});
 		});
@@ -282,7 +282,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('minStock: gte field(currentStock)');
 			expect(result).toEqual({
 				minStock: {
-					gte: 'currentStock',
+					gte: { _ref: 'currentStock', _isFieldRef: true },
 				},
 			});
 		});
@@ -291,7 +291,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('startDate: lt field(endDate)');
 			expect(result).toEqual({
 				startDate: {
-					lt: 'endDate',
+					lt: { _ref: 'endDate', _isFieldRef: true },
 				},
 			});
 		});
@@ -300,7 +300,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('maxPrice: gt field(minPrice)');
 			expect(result).toEqual({
 				maxPrice: {
-					gt: 'minPrice',
+					gt: { _ref: 'minPrice', _isFieldRef: true },
 				},
 			});
 		});
@@ -309,7 +309,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('sourceId: equals field(targetId)');
 			expect(result).toEqual({
 				sourceId: {
-					equals: 'targetId',
+					equals: { _ref: 'targetId', _isFieldRef: true },
 				},
 			});
 		});
@@ -318,7 +318,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('currentStatus: not field(previousStatus)');
 			expect(result).toEqual({
 				currentStatus: {
-					not: 'previousStatus',
+					not: { _ref: 'previousStatus', _isFieldRef: true },
 				},
 			});
 		});
@@ -327,7 +327,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('userId: field(createdBy)');
 			expect(result).toEqual({
 				userId: {
-					equals: 'createdBy',
+					equals: { _ref: 'createdBy', _isFieldRef: true },
 				},
 			});
 		});
@@ -336,7 +336,7 @@ describe('WherePipe', () => {
 			const result = pipe.transform('balance: gte field(user.minBalance)');
 			expect(result).toEqual({
 				balance: {
-					gte: 'user.minBalance',
+					gte: { _ref: 'user.minBalance', _isFieldRef: true },
 				},
 			});
 		});
@@ -347,7 +347,7 @@ describe('WherePipe', () => {
 			);
 			expect(result).toEqual({
 				qty: {
-					lte: 'recQty',
+					lte: { _ref: 'recQty', _isFieldRef: true },
 				},
 				status: 'active',
 				price: {
@@ -362,13 +362,13 @@ describe('WherePipe', () => {
 			);
 			expect(result).toEqual({
 				qty: {
-					lte: 'recQty',
+					lte: { _ref: 'recQty', _isFieldRef: true },
 				},
 				startDate: {
-					lt: 'endDate',
+					lt: { _ref: 'endDate', _isFieldRef: true },
 				},
 				minPrice: {
-					lte: 'maxPrice',
+					lte: { _ref: 'maxPrice', _isFieldRef: true },
 				},
 			});
 		});
@@ -382,7 +382,7 @@ describe('WherePipe', () => {
 			);
 			expect(result).toEqual({
 				qty: {
-					lte: 'recQty',
+					lte: { _ref: 'recQty', _isFieldRef: true },
 				},
 				createdAt: {
 					gte: '2024-01-01T00:00:00.000Z',
@@ -581,10 +581,14 @@ describe('WherePipe', () => {
 			);
 			expect(result).toEqual({
 				qty: {
-					lte: 'recQty',
+					lte: {
+						_ref: 'recQty', _isFieldRef: true
+					}
 				},
 				startDate: {
-					lt: 'endDate',
+					lt: {
+						_ref: 'endDate', _isFieldRef: true
+					}
 				},
 				createdAt: {
 					gte: '2024-01-01T00:00:00.000Z',

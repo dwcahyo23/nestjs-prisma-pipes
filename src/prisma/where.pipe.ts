@@ -128,8 +128,8 @@ function parseStringToArray(ruleValue: string): PrimitiveValue[] {
 
 /**
  * Parse field reference for field-to-field comparison
- * @example field(recQty) → { _ref: 'recQty' }
- * @example field(user.balance) → { _ref: 'user.balance' }
+ * @example field(recQty) → { _ref: 'recQty', _isFieldRef: true }
+ * @example field(user.balance) → { _ref: 'user.balance', _isFieldRef: true }
  */
 function parseFieldReference(ruleValue: string): Record<string, any> {
 	if (!ruleValue.startsWith('field(') || !ruleValue.endsWith(')')) {
@@ -141,28 +141,29 @@ function parseFieldReference(ruleValue: string): Record<string, any> {
 		return {};
 	}
 
-	// Support nested field references like user.balance
-	return { _ref: fieldPath };
+	// Return a special object that marks this as a field reference
+	// The service layer will need to convert this to prisma.[model].fields.[fieldName]
+	return { _ref: fieldPath, _isFieldRef: true };
 }
 
 /**
  * Check if a value is a field reference
  */
 function isFieldReference(value: any): boolean {
-	return typeof value === 'object' && value !== null && '_ref' in value;
+	return typeof value === 'object' && value !== null && '_isFieldRef' in value && value._isFieldRef === true;
 }
 
 /**
- * Convert field reference to Prisma field reference format
- * Prisma uses special syntax for field references in some scenarios
+ * Convert field reference to a format that can be identified by service layer
+ * Returns the field reference object that service layer should convert to prisma.model.fields.fieldName
  */
-function convertToFieldReference(fieldRef: any): string {
+function convertToFieldReference(fieldRef: any): Record<string, any> {
 	// Type guard to ensure we have a field reference object
-	if (typeof fieldRef === 'object' && fieldRef !== null && '_ref' in fieldRef) {
-		return fieldRef._ref;
+	if (typeof fieldRef === 'object' && fieldRef !== null && '_ref' in fieldRef && '_isFieldRef' in fieldRef) {
+		return fieldRef; // Return the whole object so service can identify it
 	}
-	// Fallback: return empty string if not a valid field reference
-	return '';
+	// Fallback: return empty object if not a valid field reference
+	return {};
 }
 
 /**
