@@ -19,7 +19,7 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
 ## [2.2.0]
 
 ### Added
-- [Documentation](README_WHERE.md)
+- [Internal Documentation Where Pipe](README_WHERE.md)
 - **Field-to-field comparison** - Compare values between columns in the same table! Perfect for inventory management, date validation, and business logic filters.
   
   Example:
