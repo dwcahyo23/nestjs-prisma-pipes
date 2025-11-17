@@ -34,6 +34,7 @@ const TYPE_PARSERS: Record<string, (value: string) => ParsedValue> = {
 	boolean: parseStringToBoolean,
 	bool: parseStringToBoolean,
 	array: parseStringToArray,
+	field: parseFieldReference, // NEW: field reference
 };
 
 /**
@@ -126,6 +127,45 @@ function parseStringToArray(ruleValue: string): PrimitiveValue[] {
 }
 
 /**
+ * Parse field reference for field-to-field comparison
+ * @example field(recQty) → { _ref: 'recQty' }
+ * @example field(user.balance) → { _ref: 'user.balance' }
+ */
+function parseFieldReference(ruleValue: string): Record<string, any> {
+	if (!ruleValue.startsWith('field(') || !ruleValue.endsWith(')')) {
+		return {};
+	}
+
+	const fieldPath = extractParenthesesContent(ruleValue);
+	if (!fieldPath) {
+		return {};
+	}
+
+	// Support nested field references like user.balance
+	return { _ref: fieldPath };
+}
+
+/**
+ * Check if a value is a field reference
+ */
+function isFieldReference(value: any): boolean {
+	return typeof value === 'object' && value !== null && '_ref' in value;
+}
+
+/**
+ * Convert field reference to Prisma field reference format
+ * Prisma uses special syntax for field references in some scenarios
+ */
+function convertToFieldReference(fieldRef: any): string {
+	// Type guard to ensure we have a field reference object
+	if (typeof fieldRef === 'object' && fieldRef !== null && '_ref' in fieldRef) {
+		return fieldRef._ref;
+	}
+	// Fallback: return empty string if not a valid field reference
+	return '';
+}
+
+/**
  * Detect type from string and parse accordingly
  */
 function parseValue(ruleValue: string): ParsedValue {
@@ -157,46 +197,11 @@ function extractOperatorAndValue(ruleValue: string): { operator: string | null; 
 }
 
 /**
- * Process a single rule and return the parsed data
- */
-function processRule(ruleKey: string, ruleValue: string): { key: string; value: ParsedValue } {
-	const { operator, value } = extractOperatorAndValue(ruleValue);
-
-	if (operator) {
-		return {
-			key: ruleKey,
-			value: { [operator]: parseValue(value) },
-		};
-	}
-
-	return {
-		key: ruleKey,
-		value: parseValue(value),
-	};
-}
-
-/**
- * Merge multiple rules with the same key (for date ranges, etc.)
- */
-function mergeRules(items: Record<string, any>, key: string, value: ParsedValue): void {
-	if (key.includes('.')) {
-		// Handle nested keys
-		const nestedObject = delimetedStringObject(key, value);
-		Object.assign(items, deepMerge(items, nestedObject));
-	} else if (items[key] && typeof items[key] === 'object' && typeof value === 'object') {
-		// Merge objects (for date ranges, multiple operators on same field)
-		items[key] = { ...items[key], ...value };
-	} else {
-		// Simple assignment
-		items[key] = value;
-	}
-}
-
-/**
  * @description Convert a string like
  * @example "id: int(1), firstName: banana" to { id: 1, firstName: "banana" }
  * @example "createdAt: gte date(2024-01-01), createdAt: lte date(2024-12-31)" 
  *          to { createdAt: { gte: "2024-01-01T00:00:00.000Z", lte: "2024-12-31T00:00:00.000Z" } }
+ * @example "qty: lte field(recQty)" to { qty: { lte: "recQty" } } // Field-to-field comparison
  */
 @Injectable()
 export default class WherePipe implements PipeTransform {
@@ -207,7 +212,7 @@ export default class WherePipe implements PipeTransform {
 
 		try {
 			const rules = parseObjectLiteral(value);
-			const items: Record<string, any> = {};
+			let items: Record<string, any> = {};
 
 			for (const rule of rules) {
 				const [ruleKey, ruleValue] = rule;
@@ -217,11 +222,43 @@ export default class WherePipe implements PipeTransform {
 					continue;
 				}
 
-				const { key, value: processedValue } = processRule(ruleKey, ruleValue);
+				const { operator, value: rawValue } = extractOperatorAndValue(ruleValue);
+				const parsedValue = parseValue(rawValue);
 
-				// Only add non-empty values
-				if (processedValue != null && processedValue !== '') {
-					mergeRules(items, key, processedValue);
+				// Determine the final value based on operator and field reference
+				let finalValue: any;
+
+				if (operator) {
+					// Has operator: wrap in operator object
+					if (isFieldReference(parsedValue)) {
+						finalValue = { [operator]: convertToFieldReference(parsedValue) };
+					} else {
+						finalValue = { [operator]: parsedValue };
+					}
+				} else {
+					// No operator
+					if (isFieldReference(parsedValue)) {
+						// Field reference without operator: wrap in equals
+						finalValue = { equals: convertToFieldReference(parsedValue) };
+					} else {
+						// Regular value without operator: use as-is
+						finalValue = parsedValue;
+					}
+				}
+
+				// Handle nested keys (contains dot notation)
+				if (ruleKey.indexOf('.') !== -1) {
+					const delimeted = delimetedStringObject(ruleKey, finalValue);
+					items = deepMerge(items, delimeted);
+				} else {
+					// Handle flat keys
+					if (items[ruleKey] && typeof items[ruleKey] === 'object' && typeof finalValue === 'object' && !Array.isArray(finalValue) && !Array.isArray(items[ruleKey])) {
+						// Merge objects (for date ranges, multiple operators on same field)
+						items[ruleKey] = { ...items[ruleKey], ...finalValue };
+					} else {
+						// Simple assignment
+						items[ruleKey] = finalValue;
+					}
 				}
 			}
 

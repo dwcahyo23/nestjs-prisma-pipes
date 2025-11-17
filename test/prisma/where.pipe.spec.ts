@@ -268,6 +268,133 @@ describe('WherePipe', () => {
 		});
 	});
 
+	describe('Field-to-field comparison (NEW)', () => {
+		it('should parse field reference with lte operator', () => {
+			const result = pipe.transform('qty: lte field(recQty)');
+			expect(result).toEqual({
+				qty: {
+					lte: 'recQty',
+				},
+			});
+		});
+
+		it('should parse field reference with gte operator', () => {
+			const result = pipe.transform('minStock: gte field(currentStock)');
+			expect(result).toEqual({
+				minStock: {
+					gte: 'currentStock',
+				},
+			});
+		});
+
+		it('should parse field reference with lt operator', () => {
+			const result = pipe.transform('startDate: lt field(endDate)');
+			expect(result).toEqual({
+				startDate: {
+					lt: 'endDate',
+				},
+			});
+		});
+
+		it('should parse field reference with gt operator', () => {
+			const result = pipe.transform('maxPrice: gt field(minPrice)');
+			expect(result).toEqual({
+				maxPrice: {
+					gt: 'minPrice',
+				},
+			});
+		});
+
+		it('should parse field reference with equals operator', () => {
+			const result = pipe.transform('sourceId: equals field(targetId)');
+			expect(result).toEqual({
+				sourceId: {
+					equals: 'targetId',
+				},
+			});
+		});
+
+		it('should parse field reference with not operator', () => {
+			const result = pipe.transform('currentStatus: not field(previousStatus)');
+			expect(result).toEqual({
+				currentStatus: {
+					not: 'previousStatus',
+				},
+			});
+		});
+
+		it('should parse field reference without operator (defaults to equals)', () => {
+			const result = pipe.transform('userId: field(createdBy)');
+			expect(result).toEqual({
+				userId: {
+					equals: 'createdBy',
+				},
+			});
+		});
+
+		it('should parse nested field reference', () => {
+			const result = pipe.transform('balance: gte field(user.minBalance)');
+			expect(result).toEqual({
+				balance: {
+					gte: 'user.minBalance',
+				},
+			});
+		});
+
+		it('should combine field reference with regular filters', () => {
+			const result = pipe.transform(
+				'qty: lte field(recQty), status: string(active), price: gte float(100)'
+			);
+			expect(result).toEqual({
+				qty: {
+					lte: 'recQty',
+				},
+				status: 'active',
+				price: {
+					gte: 100,
+				},
+			});
+		});
+
+		it('should parse multiple field references', () => {
+			const result = pipe.transform(
+				'qty: lte field(recQty), startDate: lt field(endDate), minPrice: lte field(maxPrice)'
+			);
+			expect(result).toEqual({
+				qty: {
+					lte: 'recQty',
+				},
+				startDate: {
+					lt: 'endDate',
+				},
+				minPrice: {
+					lte: 'maxPrice',
+				},
+			});
+		});
+
+		it('should handle field reference in complex query', () => {
+			const result = pipe.transform(
+				'qty: lte field(recQty), ' +
+				'createdAt: gte date(2024-01-01T00:00:00Z), ' +
+				'createdAt: lte date(2024-12-31T23:59:59Z), ' +
+				'status: in array(active, pending)'
+			);
+			expect(result).toEqual({
+				qty: {
+					lte: 'recQty',
+				},
+				createdAt: {
+					gte: '2024-01-01T00:00:00.000Z',
+					lte: '2024-12-31T23:59:59.000Z',
+				},
+				status: {
+					in: ['active', 'pending'],
+				},
+			});
+		});
+	});
+
 	describe('Nested relation filters', () => {
 		it('should parse nested ".is" relation filter', () => {
 			const result = pipe.transform('profile.is.id: equals int(10)');
@@ -443,6 +570,29 @@ describe('WherePipe', () => {
 				},
 			});
 		});
+
+		it('should parse complex query with field references and date ranges', () => {
+			const result = pipe.transform(
+				'qty: lte field(recQty), ' +
+				'startDate: lt field(endDate), ' +
+				'createdAt: gte date(2024-01-01T00:00:00Z), ' +
+				'createdAt: lte date(2024-12-31T23:59:59Z), ' +
+				'status: string(active)'
+			);
+			expect(result).toEqual({
+				qty: {
+					lte: 'recQty',
+				},
+				startDate: {
+					lt: 'endDate',
+				},
+				createdAt: {
+					gte: '2024-01-01T00:00:00.000Z',
+					lte: '2024-12-31T23:59:59.000Z',
+				},
+				status: 'active',
+			});
+		});
 	});
 
 	describe('Edge cases', () => {
@@ -467,6 +617,15 @@ describe('WherePipe', () => {
 			expect(result).toEqual({
 				data: {
 					in: [1, 'test', true],
+				},
+			});
+		});
+
+		it('should handle empty field reference', () => {
+			const result = pipe.transform('qty: lte field()');
+			expect(result).toEqual({
+				qty: {
+					lte: {},
 				},
 			});
 		});

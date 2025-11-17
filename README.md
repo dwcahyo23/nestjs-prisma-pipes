@@ -16,6 +16,17 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
 
 # 📜 Changelog
 
+## [2.2.0]
+
+### Added
+- [Documentation](README_WHERE.md)
+- **Field-to-field comparison** - Compare values between columns in the same table! Perfect for inventory management, date validation, and business logic filters.
+  
+  Example:
+  ```url
+  ?where=qty:lte field(recQty),startDate:lt field(endDate)
+  ```
+
 ## [2.1.0]
 
 ### Added
@@ -111,14 +122,15 @@ Convert query strings into **Prisma `where` objects** with support for operators
 
 ### 🔢 Supported Value Types
 
-| Type    | Syntax                            | Example                                           |
-| ------- | --------------------------------- | ------------------------------------------------- |
-| String  | `string(value)`                   | `string(John)` → `"John"`                         |
-| Integer | `int(value)`                      | `int(42)` → `42`                                  |
-| Float   | `float(value)`                    | `float(3.14)` → `3.14`                            |
-| Boolean | `boolean(value)` / `bool(value)`  | `bool(true)` → `true`                             |
-| Date    | `date(value)` / `datetime(value)` | `date(2025-01-01)` → `"2025-01-01T00:00:00.000Z"` |
-| Array   | `array(type(...))`                | `array(int(1),int(2))` → `[1,2]`                  |
+| Type           | Syntax                            | Example                                           |
+| -------------- | --------------------------------- | ------------------------------------------------- |
+| String         | `string(value)`                   | `string(John)` → `"John"`                         |
+| Integer        | `int(value)`                      | `int(42)` → `42`                                  |
+| Float          | `float(value)`                    | `float(3.14)` → `3.14`                            |
+| Boolean        | `boolean(value)` / `bool(value)`  | `bool(true)` → `true`                             |
+| Date           | `date(value)` / `datetime(value)` | `date(2025-01-01)` → `"2025-01-01T00:00:00.000Z"` |
+| Array          | `array(type(...))`                | `array(int(1),int(2))` → `[1,2]`                  |
+| Field (NEW 🔥) | `field(columnName)`               | `field(recQty)` → Reference to `recQty` column    |
 
 ---
 
@@ -188,6 +200,117 @@ Convert query strings into **Prisma `where` objects** with support for operators
   }
 }
 ```
+
+---
+
+### 🔄 Field-to-Field Comparison
+
+**NEW in v2.2.0**: Compare values between columns in the same table! This is incredibly useful for:
+- Inventory management (quantity vs recommended quantity)
+- Date validation (start date vs end date)
+- Price ranges (min price vs max price)
+- Business logic filters (actual vs target values)
+
+#### Basic Field Comparison
+
+```url
+?where=qty:lte field(recQty)
+```
+
+```ts
+{
+  qty: {
+    lte: "recQty" // Compare qty with recQty column
+  }
+}
+```
+
+**Prisma equivalent:**
+```ts
+prisma.item.findMany({
+  where: {
+    qty: {
+      lte: prisma.item.fields.recQty
+    }
+  }
+})
+```
+
+#### Date Field Comparison
+
+```url
+?where=startDate:lt field(endDate)
+```
+
+```ts
+{
+  startDate: {
+    lt: "endDate"
+  }
+}
+```
+
+#### Multiple Field Comparisons
+
+```url
+?where=qty:lte field(recQty),startDate:lt field(endDate),minPrice:lte field(maxPrice)
+```
+
+```ts
+{
+  qty: {
+    lte: "recQty"
+  },
+  startDate: {
+    lt: "endDate"
+  },
+  minPrice: {
+    lte: "maxPrice"
+  }
+}
+```
+
+#### Nested Field References
+
+```url
+?where=balance:gte field(user.minBalance)
+```
+
+```ts
+{
+  balance: {
+    gte: "user.minBalance"
+  }
+}
+```
+
+#### Combined with Other Filters
+
+```url
+?where=qty:lte field(recQty),status:string(active),price:gte float(100)
+```
+
+```ts
+{
+  qty: {
+    lte: "recQty"
+  },
+  status: "active",
+  price: {
+    gte: 100
+  }
+}
+```
+
+#### Supported Operators for Field Comparison
+
+All comparison operators work with field references:
+- `equals` - Field A equals Field B
+- `not` - Field A not equals Field B
+- `lt` - Field A less than Field B
+- `lte` - Field A less than or equal to Field B
+- `gt` - Field A greater than Field B
+- `gte` - Field A greater than or equal to Field B
 
 ---
 
@@ -430,7 +553,25 @@ Convert query strings into **Prisma `where` objects** with support for operators
 }
 ```
 
-#### 2. User Activity Report
+#### 2. Inventory Low Stock Alert
+
+```url
+?where=qty:lte field(recQty),status:string(active),lastRestocked:lte date(2024-01-01)
+```
+
+```ts
+{
+  qty: {
+    lte: "recQty" // Items where current quantity <= recommended quantity
+  },
+  status: "active",
+  lastRestocked: {
+    lte: "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+#### 3. User Activity Report
 
 ```url
 ?where=user.is.role:string(admin),createdAt:gte date(2024-01-01),createdAt:lte date(2024-12-31),status:not string(deleted)
@@ -453,7 +594,27 @@ Convert query strings into **Prisma `where` objects** with support for operators
 }
 ```
 
-#### 3. Blog Post Search with Relations
+#### 4. Event Scheduling Validation
+
+```url
+?where=startDate:lt field(endDate),status:in array(scheduled,active),capacity:gte field(minParticipants)
+```
+
+```ts
+{
+  startDate: {
+    lt: "endDate" // Start date must be before end date
+  },
+  status: {
+    in: ["scheduled", "active"]
+  },
+  capacity: {
+    gte: "minParticipants" // Capacity must meet minimum
+  }
+}
+```
+
+#### 5. Blog Post Search with Relations
 
 ```url
 ?where=title:contains string(NestJS),publishedAt:gte date(2024-01-01),author.is.verified:bool(true),tags:hasEvery array(tutorial,backend),comments.some.rating:gte int(4)
@@ -485,33 +646,42 @@ Convert query strings into **Prisma `where` objects** with support for operators
 }
 ```
 
-#### 4. Inventory Management
+#### 6. Financial Transaction Filter
 
 ```url
-?where=warehouse.is.location.city:string(Jakarta),quantity:lt int(10),lastRestocked:lte date(2024-01-01),product.category.name:in array(electronics,appliances)
+?where=amount:gte field(minAmount),amount:lte field(maxAmount),transactionDate:gte date(2024-01-01),transactionDate:lte date(2024-12-31),status:string(completed)
 ```
 
 ```ts
 {
-  warehouse: {
-    is: {
-      location: {
-        city: "Jakarta"
-      }
-    }
+  amount: {
+    gte: "minAmount", // Amount within min-max range
+    lte: "maxAmount"
   },
-  quantity: {
-    lt: 10
+  transactionDate: {
+    gte: "2024-01-01T00:00:00.000Z",
+    lte: "2024-12-31T23:59:59.000Z"
   },
-  lastRestocked: {
-    lte: "2024-01-01T00:00:00.000Z"
+  status: "completed"
+}
+```
+
+#### 7. Performance Metrics
+
+```url
+?where=actualValue:lt field(targetValue),score:gte int(70),evaluationDate:gte date(2024-01-01)
+```
+
+```ts
+{
+  actualValue: {
+    lt: "targetValue" // Find underperforming records
   },
-  product: {
-    category: {
-      name: {
-        in: ["electronics", "appliances"]
-      }
-    }
+  score: {
+    gte: 70
+  },
+  evaluationDate: {
+    gte: "2024-01-01T00:00:00.000Z"
   }
 }
 ```
@@ -522,9 +692,11 @@ Convert query strings into **Prisma `where` objects** with support for operators
 
 1. **Type Your Values**: Always use type wrappers (`int()`, `string()`, `bool()`, etc.) for explicit type conversion
 2. **Date Ranges**: Use `gte` and `lte` together for accurate date ranges
-3. **Relations**: Use `.is` for one-to-one, `.some`/`.every`/`.none` for one-to-many
-4. **Arrays**: Use `array()` wrapper with typed values inside: `array(int(1),int(2))`
-5. **Complex Queries**: Combine multiple conditions with commas for precise filtering
+3. **Field Comparisons**: Use `field()` wrapper to compare columns within the same table
+4. **Relations**: Use `.is` for one-to-one, `.some`/`.every`/`.none` for one-to-many
+5. **Arrays**: Use `array()` wrapper with typed values inside: `array(int(1),int(2))`
+6. **Complex Queries**: Combine multiple conditions with commas for precise filtering
+7. **Nested Fields**: Support nested field references like `field(user.minBalance)`
 
 ---
 
@@ -535,6 +707,23 @@ Convert query strings into **Prisma `where` objects** with support for operators
 - All date values are automatically converted to ISO 8601 format
 - Nested properties use dot notation: `user.profile.name`
 - Multiple operators on the same field are merged automatically
+- Field references (`field()`) compare values between columns at query time
+- Field comparisons work with all comparison operators: `lt`, `lte`, `gt`, `gte`, `equals`, `not`
+
+---
+
+### 🔥 Use Cases for Field Comparison
+
+| Scenario                    | Example                                         | Use Case                                      |
+| --------------------------- | ----------------------------------------------- | --------------------------------------------- |
+| Inventory Management        | `qty:lte field(recQty)`                         | Find items below recommended stock            |
+| Date Validation             | `startDate:lt field(endDate)`                   | Validate date ranges                          |
+| Price Range Validation      | `minPrice:lte field(maxPrice)`                  | Ensure price logic is correct                 |
+| Performance Tracking        | `actualValue:lt field(targetValue)`             | Find underperforming metrics                  |
+| Budget Management           | `spent:lte field(budget)`                       | Monitor spending limits                       |
+| Capacity Planning           | `currentCapacity:gte field(minRequired)`        | Ensure minimum requirements are met           |
+| Time Tracking               | `actualHours:gt field(estimatedHours)`          | Find tasks that exceeded estimates            |
+| Quality Control             | `defectRate:lte field(maxAllowedDefects)`       | Filter by quality thresholds                  |
 
 ---
 
