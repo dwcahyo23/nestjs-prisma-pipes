@@ -16,6 +16,12 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
 
 # 📜 Changelog
 
+## [2.3.0]
+
+### Added
+- **AggregatePipe** — Parse URL query into Prisma `aggregate()` options
+  Supports: `_count`, `_sum`, `_avg`, `_min`, `_max`
+
 ## [2.2.1]
 
 ### Added
@@ -210,7 +216,7 @@ Convert query strings into **Prisma `where` objects** with support for operators
 
 ### 🔄 Field-to-Field Comparison
 
-**NEW in v2.2.1**: Compare values between columns in the same table! This is incredibly useful for:
+**In v2.2.1**: Compare values between columns in the same table! This is incredibly useful for:
 - Inventory management (quantity vs recommended quantity)
 - Date validation (start date vs end date)
 - Price ranges (min price vs max price)
@@ -938,7 +944,7 @@ Include relations, with optional **nested includes & selects**.
 
 ---
 
-## 5️⃣ Combined Example
+## Combined Example
 
 ```url
 /users?where=firstName:contains string(John),createdAt:gte date(2024-01-01),createdAt:lte date(2024-12-31)&orderBy=user.profile.name:asc&select=id,firstName&include=profile
@@ -961,16 +967,148 @@ Include relations, with optional **nested includes & selects**.
 
 ---
 
-## 💡 Pro Tips
+## 5️⃣ AggregatePipe
+## 🎯 Query Format
 
-- All pipes handle **empty / undefined query params** gracefully.
-- `where`, `orderBy`, `select`, and `include` all support **deep nesting**.
-- Mix `select` and `include` freely to shape your response.
-- **Date ranges** can be applied on the same column for precise filtering.
-- Perfect for building **dynamic, frontend-driven filters**.
-- Use type wrappers for **type safety** and predictable behavior.
+```
+aggregate=field1: function(params), field2: function(params), chart: type(dateField, interval)
+```
+
+### ✔ Supported functions
+
+| Function                    | Prisma Output |
+| --------------------------- | ------------- |
+| `sum()`                     | `_sum`        |
+| `avg()`                     | `_avg`        |
+| `min()`                     | `_min`        |
+| `max()`                     | `_max`        |
+| `count()` or `count(field)` | `_count`      |
 
 ---
+
+## 🎯 Chart Metadata (Optional)
+
+```
+chart: type(field, interval)
+```
+
+Examples:
+
+```
+chart: line(createdAt, month)
+chart: bar(orderDate, day)
+chart: pie
+chart: donut(status)
+```
+
+* `type` → line, bar, area, pie, donut
+* `field` → field used for date grouping (optional)
+* `interval` → day, week, month, quarter, year
+
+> Chart metadata is **not passed to Prisma**, but parsed by the pipe so the service layer can generate chart-ready datasets.
+
+---
+
+## 📌 Examples
+
+### 1. Simple Aggregation
+
+```
+?aggregate=revenue: sum(), orders: count()
+```
+
+Output:
+
+```ts
+{
+  prisma: {
+    _sum: { revenue: true },
+    _count: { orders: true }
+  }
+}
+```
+
+---
+
+### 2. Multiple Aggregations
+
+```
+?aggregate=price: avg(), quantity: sum()
+```
+
+```ts
+{
+  prisma: {
+    _avg: { price: true },
+    _sum: { quantity: true }
+  }
+}
+```
+
+---
+
+### 3. With Chart Metadata
+
+```
+?aggregate=price: avg(), chart: bar(createdAt, month)
+```
+
+```ts
+{
+  prisma: {
+    _avg: { price: true }
+  },
+  chart: {
+    type: "bar",
+    field: "createdAt",
+    interval: "month"
+  }
+}
+```
+
+---
+
+### 4. Date-based Line Chart
+
+```
+?aggregate=total: sum(), chart: line(orderDate, month)
+```
+
+```ts
+{
+  prisma: {
+    _sum: { total: true }
+  },
+  chart: {
+    type: "line",
+    field: "orderDate",
+    interval: "month"
+  }
+}
+```
+
+---
+
+### 5. Count With Parameter
+
+```
+?aggregate=amount: sum(), status: count(id), chart: pie
+```
+
+```ts
+{
+  prisma: {
+    _sum: { amount: true },
+    _count: { id: true }
+  },
+  chart: {
+    type: "pie"
+  }
+}
+```
+
+---
+
 
 ## 🗺 Roadmap – Next Pipes
 
@@ -983,9 +1121,8 @@ These are the upcoming pipes planned for future releases:
 | `GroupByPipe`    | Parse `groupBy` queries into Prisma `groupBy` options (with aggregates)    | 🔵 Research |
 | `HavingPipe`     | Support SQL-like `having` filters after grouping                           | 🔵 Research |
 | `CountPipe`      | Shortcut to request `count` results alongside data                         | 🟡 Planned  |
-| `AggregatePipe`  | Parse aggregate queries (`_sum`, `_avg`, `_min`, `_max`) into Prisma query | 🔵 Research |
 
-✅ Already Available: `WherePipe`, `OrderByPipe`, `SelectPipe`, `IncludePipe`
+✅ Already Available: `WherePipe`, `OrderByPipe`, `SelectPipe`, `IncludePipe`, `AggregatePipe`
 
 ---
 

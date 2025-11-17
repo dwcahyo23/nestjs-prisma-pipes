@@ -6,4 +6,6 @@ export namespace Pipes {
 	export type Select = Record<string, boolean>;
 
 	export type Include = Record<string, any>;
+
+	export type Aggregate = Record<string, any>;
 }
