@@ -1,8 +1,24 @@
 # 🛠 @dwcahyo/nestjs-prisma-pipes
 
 **NestJS + Prisma query pipes**  
-Parse query strings (`where`, `orderBy`, `select`, `include`) directly into **Prisma-ready objects**.  
+Parse query strings (`where`, `orderBy`, `select`, `include`, `aggregate`) directly into **Prisma-ready objects**.  
 No more manual parsing — just pass query params, and you're good to go 🚀
+
+---
+
+## 📑 Table of Contents
+
+- [Installation](#-installation)
+- [Changelog](#-changelog)
+- [Quick Start](#-quick-start)
+- [Pipes Overview](#-pipes-overview)
+- **Pipes Documentation**
+  - [1. WherePipe](#1️⃣-wherepipe) - Filter with operators, types, field comparisons
+  - [2. OrderByPipe](#2️⃣-orderbypipe) - Sort with nested relations
+  - [3. SelectPipe](#3️⃣-selectpipe) - Pick specific fields
+  - [4. IncludePipe](#4️⃣-includepipe) - Include relations
+  - [5. AggregatePipe](#5️⃣-aggregatepipe) - Aggregations & charts ⭐ NEW
+- [Roadmap](#-roadmap--next-pipes)
 
 ---
 
@@ -14,52 +30,95 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
 
 ---
 
-# 📜 Changelog
+## 📜 Changelog
 
-## [2.3.0]
+### [2.4.0] - 2025
 
-### Added
-- **AggregatePipe** — Parse URL query into Prisma `aggregate()` options
-  Supports: `_count`, `_sum`, `_avg`, `_min`, `_max`
+#### 🎉 Major Release - AggregatePipe with Chart Support
 
-## [2.2.1]
+##### Added
+- **AggregatePipe** - Complete aggregation support with chart-ready transformations
+  - Support for all aggregate functions: `sum()`, `avg()`, `min()`, `max()`, `count()`
+  - Time series support: `day`, `month`, `year` intervals
+  - Chart type specification: `bar`, `line`, `pie`
+  - Automatic gap filling for time series data (fills missing months with 0)
+  - Multiple aggregates per query
+  - Combines seamlessly with WherePipe for filtered aggregations
+  
+  **Example:**
+  ```url
+  ?where=status: string(active)&aggregate=revenue: sum(), orders: count(), chart: line(createdAt, month)
+  ```
 
-### Added
-- **Field-to-field helper** --Helper to returns a special format for field references that must be converted in service layer before passing to Prima
+- **Strong TypeScript Types** - Complete type safety for all pipes
+  - `Pipes.Where` - Recursive types with operators & field references
+  - `Pipes.OrderBy` - Nested sort support
+  - `Pipes.Select` - Nested field selection
+  - `Pipes.Include` - Complex include clauses with where/orderBy/pagination
+  - `Pipes.Aggregate` - Complete aggregate configuration
+  - `Pipes.ChartSeries` - Chart-ready data structure
+  - Helper types: `FilterOperator`, `SortDirection`, `AggregateFunction`, `ChartType`, `TimeInterval`
 
-## [2.2.0]
+##### Improved
+- Enhanced type safety across all pipes
+- Better error messages for invalid queries
+- Comprehensive documentation with real-world examples
+- Added navigation links for easier documentation browsing
 
-### Added
+---
+
+### [2.3.0]
+
+#### Added
+- **AggregatePipe (Basic)** — Parse URL query into Prisma `aggregate()` options
+  - Supports: `_count`, `_sum`, `_avg`, `_min`, `_max`
+
+---
+
+### [2.2.1]
+
+#### Added
+- **Field-to-field helper** - Helper to returns a special format for field references that must be converted in service layer before passing to Prisma
+
+---
+
+### [2.2.0]
+
+#### Added
 - [Internal Documentation Where Pipe](README_WHERE.md)
 - **Field-to-field comparison** - Compare values between columns in the same table! Perfect for inventory management, date validation, and business logic filters.
   
-  Example:
+  **Example:**
   ```url
   ?where=qty:lte field(recQty),startDate:lt field(endDate)
   ```
 
-## [2.1.0]
+---
 
-### Added
+### [2.1.0]
+
+#### Added
 - **Date range support on the same column** - Now you can apply multiple operators (e.g., `gte` and `lte`) on the same field for powerful date filtering.
   
-  Example:
+  **Example:**
   ```url
-  ?where=createdAt:gte date(2024-01-01),createdAt:lte date(2024-12-31)
+  ?where=createdAt:gte date(2025-01-01),createdAt:lte date(2025-12-31)
   ```
 
-### Improved
+#### Improved
 - **Refactored WherePipe** for better scalability, maintainability, and type safety
 - Enhanced type parsers with registry pattern for easier extensibility
 - Improved error handling and validation
 - Better support for merging multiple operators on the same field
 
-## [2.0.4]
+---
 
-### Added
+### [2.0.4]
+
+#### Added
 - Support for **nested `orderBy`** (multi-level deep ordering).
   
-  Example:
+  **Example:**
   ```url
   ?orderBy=user.profile.name:asc,posts.comments.createdAt:desc
   ```
@@ -79,6 +138,7 @@ import {
   OrderByPipe,
   SelectPipe,
   IncludePipe,
+  AggregatePipe,
 } from "@dwcahyo/nestjs-prisma-pipes";
 
 @Controller("users")
@@ -94,6 +154,24 @@ export class UserController {
   ) {
     return this.prisma.user.findMany({ where, orderBy, select, include });
   }
+
+  @Get("stats")
+  async getStats(
+    @Query("where", WherePipe) where?: Pipes.Where,
+    @Query("aggregate", AggregatePipe) aggregate?: Pipes.Aggregate
+  ) {
+    const data = aggregate?.isGrouped
+      ? await this.prisma.order.groupBy({
+          where,
+          ...aggregate.prismaQuery,
+        })
+      : await this.prisma.order.aggregate({
+          where,
+          ...aggregate.prismaQuery,
+        });
+
+    return AggregatePipe.toChartSeries(data, aggregate);
+  }
 }
 ```
 
@@ -101,24 +179,25 @@ export class UserController {
 
 ## 🔎 Pipes Overview
 
-| Pipe          | Purpose                                                       |
-| ------------- | ------------------------------------------------------------- |
-| `WherePipe`   | Parse `where` filters (supports operators & nested relations) |
-| `OrderByPipe` | Parse `orderBy` filters (supports deep nesting)               |
-| `SelectPipe`  | Pick specific fields to return                                |
-| `IncludePipe` | Include relations (with nested `select`)                      |
+| Pipe            | Purpose                                                       | Version |
+| --------------- | ------------------------------------------------------------- | ------- |
+| `WherePipe`     | Parse `where` filters (supports operators & nested relations) | 2.0+    |
+| `OrderByPipe`   | Parse `orderBy` filters (supports deep nesting)               | 2.0+    |
+| `SelectPipe`    | Pick specific fields to return                                | 1.0+    |
+| `IncludePipe`   | Include relations (with nested `select`)                      | 1.0+    |
+| `AggregatePipe` | Aggregations with chart support ⭐ NEW                        | 2.0+    |
+
+[↑ Back to top](#-table-of-contents)
 
 ---
 
 ## 1️⃣ WherePipe
 
-Convert query strings into **Prisma `where` objects** with support for operators, nested relations, type casting, and **date ranges on the same column**.
+Convert query strings into **Prisma `where` objects** with support for operators, nested relations, type casting, date ranges, and field-to-field comparisons.
 
 ```ts
 @Query("where", WherePipe) where?: Pipes.Where
 ```
-
----
 
 ### 🔧 Supported Operators
 
@@ -128,8 +207,6 @@ Convert query strings into **Prisma `where` objects** with support for operators
 | Text       | `contains`, `startsWith`, `endsWith`      | `?where=name:contains string(John)`              |
 | Arrays     | `has`, `hasEvery`, `hasSome`, `in`        | `?where=id:in array(int(1),int(2))`              |
 | Relations  | `is`, `some`, `every`, `none`             | `?where=posts.some.title:contains string(Hello)` |
-
----
 
 ### 🔢 Supported Value Types
 
@@ -143,664 +220,52 @@ Convert query strings into **Prisma `where` objects** with support for operators
 | Array          | `array(type(...))`                | `array(int(1),int(2))` → `[1,2]`                  |
 | Field (NEW 🔥) | `field(columnName)`               | `field(recQty)` → Reference to `recQty` column    |
 
----
+### 🧩 Basic Examples
 
-### 🧩 Examples
-
-#### 1. Basic Filter
-
+#### Simple Filter
 ```url
 ?where=firstName:John
 ```
-
 ```ts
 { firstName: "John" }
 ```
 
-#### 2. Typed Value
-
+#### With Type
 ```url
 ?where=age:int(25)
 ```
-
 ```ts
 { age: 25 }
 ```
 
-#### 3. Text Search
-
+#### Text Search
 ```url
 ?where=firstName:contains string(John)
 ```
-
 ```ts
-{
-  firstName: {
-    contains: "John"
-  }
-}
+{ firstName: { contains: "John" } }
 ```
 
-#### 4. Comparison Operator
-
-```url
-?where=age:gt int(18)
-```
-
-```ts
-{
-  age: {
-    gt: 18
-  }
-}
-```
-
-#### 5. Multiple Conditions
-
+#### Multiple Conditions
 ```url
 ?where=firstName:contains string(John),age:gte int(18)
 ```
-
 ```ts
 {
-  firstName: {
-    contains: "John"
-  },
-  age: {
-    gte: 18
-  }
+  firstName: { contains: "John" },
+  age: { gte: 18 }
 }
 ```
 
----
+[See more WherePipe examples ↓](#-advanced-where-examples)
 
-### 🔄 Field-to-Field Comparison
-
-**In v2.2.1**: Compare values between columns in the same table! This is incredibly useful for:
-- Inventory management (quantity vs recommended quantity)
-- Date validation (start date vs end date)
-- Price ranges (min price vs max price)
-- Business logic filters (actual vs target values)
-
-#### ⚠️ Important: Service Layer Conversion Required
-
-WherePipe returns a special format for field references that **must be converted** in your service layer before passing to Prisma.
-
-**Step 1: Import the helper**
-```typescript
-// Copy field-ref-converter.helper.ts to your project
-import { convertFieldReferences } from '@dwcahyo/nestjs-prisma-pipes';
-```
-
-**Step 2: Use in your service**
-```typescript
-@Injectable()
-export class YourService {
-  constructor(private prisma: PrismaService) {}
-
-  async findMany(
-    @Query('where', WherePipe) whereFromPipe?: Pipes.Where
-  ) {
-    // Convert field references before passing to Prisma
-    const where = convertFieldReferences(whereFromPipe, this.prisma.yourModel);
-    
-    return this.prisma.yourModel.findMany({ where });
-  }
-}
-```
-
-#### Basic Field Comparison
-
-**Query:**
-```url
-?where=qty:lte field(recQty)
-```
-
-**Pipe Output:**
-```ts
-{
-  qty: {
-    lte: { _ref: "recQty", _isFieldRef: true }
-  }
-}
-```
-
-**After Conversion:**
-```ts
-{
-  qty: {
-    lte: prisma.marketingSPB.fields.recQty
-  }
-}
-```
-
-**Full Example:**
-```typescript
-// Controller
-@Get()
-async findAll(@Query('where', WherePipe) where?: Pipes.Where) {
-  return this.service.findAll(where);
-}
-
-// Service
-import { convertFieldReferences } from '@dwcahyo/nestjs-prisma-pipes';
-
-async findAll(whereFromPipe: any) {
-  const where = convertFieldReferences(whereFromPipe, this.prisma.marketingSPB);
-  return this.prisma.marketingSPB.findMany({ where });
-}
-```
-
-#### Date Field Comparison
-
-```url
-?where=startDate:lt field(endDate)
-```
-
-```ts
-// After conversion
-{
-  startDate: {
-    lt: prisma.event.fields.endDate
-  }
-}
-```
-
-#### Multiple Field Comparisons
-
-```url
-?where=qty:lte field(recQty),startDate:lt field(endDate),minPrice:lte field(maxPrice)
-```
-
-```ts
-// After conversion
-{
-  qty: {
-    lte: prisma.product.fields.recQty
-  },
-  startDate: {
-    lt: prisma.event.fields.endDate
-  },
-  minPrice: {
-    lte: prisma.product.fields.maxPrice
-  }
-}
-```
-
-#### Combined with Other Filters
-
-```url
-?where=qty:lte field(recQty),status:string(active),price:gte float(100)
-```
-
-```ts
-// After conversion
-{
-  qty: {
-    lte: prisma.product.fields.recQty
-  },
-  status: "active",
-  price: {
-    gte: 100
-  }
-}
-```
-
-#### Supported Operators for Field Comparison
-
-All comparison operators work with field references:
-- `equals` - Field A equals Field B
-- `not` - Field A not equals Field B
-- `lt` - Field A less than Field B
-- `lte` - Field A less than or equal to Field B
-- `gt` - Field A greater than Field B
-- `gte` - Field A greater than or equal to Field B
-
-#### Helper Function: convertFieldReferences
-
-```typescript
-/**
- * field-ref-converter.helper.ts
- */
-export function convertFieldReferences(obj: any, modelDelegate: any): any {
-  // Recursively converts { _ref: 'fieldName', _isFieldRef: true }
-  // to prisma.model.fields.fieldName
-  
-  // See full implementation in artifacts
-}
-
-// Optional: Create a reusable converter
-import { createFieldRefConverter } from '@dwcahyo/nestjs-prisma-pipes';
-
-@Injectable()
-export class YourService {
-  private convertWhere = createFieldRefConverter(this.prisma.yourModel);
-
-  async findMany(whereFromPipe: any) {
-    const where = this.convertWhere(whereFromPipe);
-    return this.prisma.yourModel.findMany({ where });
-  }
-}
-```
-
----
-
-### 📅 Date Range Support
-
-**NEW in v2.1.0**: Apply multiple operators on the same column for powerful date filtering!
-
-#### Single Date Filter
-
-```url
-?where=createdAt:gte date(2024-01-01T00:00:00Z)
-```
-
-```ts
-{
-  createdAt: {
-    gte: "2024-01-01T00:00:00.000Z"
-  }
-}
-```
-
-#### Date Range (Same Column)
-
-```url
-?where=createdAt:gte date(2024-01-01T00:00:00Z),createdAt:lte date(2024-12-31T23:59:59Z)
-```
-
-```ts
-{
-  createdAt: {
-    gte: "2024-01-01T00:00:00.000Z",
-    lte: "2024-12-31T23:59:59.000Z"
-  }
-}
-```
-
-#### Multiple Date Ranges
-
-```url
-?where=createdAt:gte date(2024-01-01),createdAt:lte date(2024-12-31),updatedAt:gte date(2024-06-01),updatedAt:lte date(2024-06-30)
-```
-
-```ts
-{
-  createdAt: {
-    gte: "2024-01-01T00:00:00.000Z",
-    lte: "2024-12-31T00:00:00.000Z"
-  },
-  updatedAt: {
-    gte: "2024-06-01T00:00:00.000Z",
-    lte: "2024-06-30T00:00:00.000Z"
-  }
-}
-```
-
-#### Complex Date Query
-
-```url
-?where=status:equals string(active),createdAt:gte date(2024-01-01),createdAt:lte date(2024-12-31),publishedAt:not date(2024-06-15)
-```
-
-```ts
-{
-  status: {
-    equals: "active"
-  },
-  createdAt: {
-    gte: "2024-01-01T00:00:00.000Z",
-    lte: "2024-12-31T00:00:00.000Z"
-  },
-  publishedAt: {
-    not: "2024-06-15T00:00:00.000Z"
-  }
-}
-```
-
----
-
-### 🔗 Nested Relations
-
-#### Simple Relation Filter
-
-```url
-?where=profile.is.verified:bool(true)
-```
-
-```ts
-{
-  profile: {
-    is: {
-      verified: true
-    }
-  }
-}
-```
-
-#### Collection Relation Filter
-
-```url
-?where=posts.some.title:contains string(Hello)
-```
-
-```ts
-{
-  posts: {
-    some: {
-      title: {
-        contains: "Hello"
-      }
-    }
-  }
-}
-```
-
-#### Deep Nested Relations
-
-```url
-?where=company.departments.every.employees.some.name:startsWith string(A)
-```
-
-```ts
-{
-  company: {
-    departments: {
-      every: {
-        employees: {
-          some: {
-            name: {
-              startsWith: "A"
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-#### Mixed Nested and Flat Filters
-
-```url
-?where=status:active,user.is.role:string(admin),createdAt:gte date(2024-01-01)
-```
-
-```ts
-{
-  status: "active",
-  user: {
-    is: {
-      role: "admin"
-    }
-  },
-  createdAt: {
-    gte: "2024-01-01T00:00:00.000Z"
-  }
-}
-```
-
----
-
-### 📦 Array Operations
-
-#### In Array
-
-```url
-?where=id:in array(int(1),int(2),int(3))
-```
-
-```ts
-{
-  id: {
-    in: [1, 2, 3]
-  }
-}
-```
-
-#### Has Element
-
-```url
-?where=tags:has string(urgent)
-```
-
-```ts
-{
-  tags: {
-    has: "urgent"
-  }
-}
-```
-
-#### Has Every
-
-```url
-?where=tags:hasEvery array(urgent,important)
-```
-
-```ts
-{
-  tags: {
-    hasEvery: ["urgent", "important"]
-  }
-}
-```
-
-#### Has Some
-
-```url
-?where=categories:hasSome array(int(1),int(2),int(5))
-```
-
-```ts
-{
-  categories: {
-    hasSome: [1, 2, 5]
-  }
-}
-```
-
----
-
-### 🎯 Advanced Real-World Examples
-
-#### 1. E-commerce Product Search
-
-```url
-?where=category:string(Electronics),price:gte float(100),price:lte float(500),inStock:bool(true),tags:hasSome array(sale,featured)
-```
-
-```ts
-{
-  category: "Electronics",
-  price: {
-    gte: 100,
-    lte: 500
-  },
-  inStock: true,
-  tags: {
-    hasSome: ["sale", "featured"]
-  }
-}
-```
-
-#### 2. Inventory Low Stock Alert
-
-```url
-?where=qty:lte field(recQty),status:string(active),lastRestocked:lte date(2024-01-01)
-```
-
-```ts
-{
-  qty: {
-    lte: "recQty" // Items where current quantity <= recommended quantity
-  },
-  status: "active",
-  lastRestocked: {
-    lte: "2024-01-01T00:00:00.000Z"
-  }
-}
-```
-
-#### 3. User Activity Report
-
-```url
-?where=user.is.role:string(admin),createdAt:gte date(2024-01-01),createdAt:lte date(2024-12-31),status:not string(deleted)
-```
-
-```ts
-{
-  user: {
-    is: {
-      role: "admin"
-    }
-  },
-  createdAt: {
-    gte: "2024-01-01T00:00:00.000Z",
-    lte: "2024-12-31T23:59:59.000Z"
-  },
-  status: {
-    not: "deleted"
-  }
-}
-```
-
-#### 4. Event Scheduling Validation
-
-```url
-?where=startDate:lt field(endDate),status:in array(scheduled,active),capacity:gte field(minParticipants)
-```
-
-```ts
-{
-  startDate: {
-    lt: "endDate" // Start date must be before end date
-  },
-  status: {
-    in: ["scheduled", "active"]
-  },
-  capacity: {
-    gte: "minParticipants" // Capacity must meet minimum
-  }
-}
-```
-
-#### 5. Blog Post Search with Relations
-
-```url
-?where=title:contains string(NestJS),publishedAt:gte date(2024-01-01),author.is.verified:bool(true),tags:hasEvery array(tutorial,backend),comments.some.rating:gte int(4)
-```
-
-```ts
-{
-  title: {
-    contains: "NestJS"
-  },
-  publishedAt: {
-    gte: "2024-01-01T00:00:00.000Z"
-  },
-  author: {
-    is: {
-      verified: true
-    }
-  },
-  tags: {
-    hasEvery: ["tutorial", "backend"]
-  },
-  comments: {
-    some: {
-      rating: {
-        gte: 4
-      }
-    }
-  }
-}
-```
-
-#### 6. Financial Transaction Filter
-
-```url
-?where=amount:gte field(minAmount),amount:lte field(maxAmount),transactionDate:gte date(2024-01-01),transactionDate:lte date(2024-12-31),status:string(completed)
-```
-
-```ts
-{
-  amount: {
-    gte: "minAmount", // Amount within min-max range
-    lte: "maxAmount"
-  },
-  transactionDate: {
-    gte: "2024-01-01T00:00:00.000Z",
-    lte: "2024-12-31T23:59:59.000Z"
-  },
-  status: "completed"
-}
-```
-
-#### 7. Performance Metrics
-
-```url
-?where=actualValue:lt field(targetValue),score:gte int(70),evaluationDate:gte date(2024-01-01)
-```
-
-```ts
-{
-  actualValue: {
-    lt: "targetValue" // Find underperforming records
-  },
-  score: {
-    gte: 70
-  },
-  evaluationDate: {
-    gte: "2024-01-01T00:00:00.000Z"
-  }
-}
-```
-
----
-
-### 💡 Best Practices
-
-1. **Type Your Values**: Always use type wrappers (`int()`, `string()`, `bool()`, etc.) for explicit type conversion
-2. **Date Ranges**: Use `gte` and `lte` together for accurate date ranges
-3. **Field Comparisons**: Use `field()` wrapper to compare columns within the same table
-4. **Relations**: Use `.is` for one-to-one, `.some`/`.every`/`.none` for one-to-many
-5. **Arrays**: Use `array()` wrapper with typed values inside: `array(int(1),int(2))`
-6. **Complex Queries**: Combine multiple conditions with commas for precise filtering
-7. **Nested Fields**: Support nested field references like `field(user.minBalance)`
-
----
-
-### ⚠️ Important Notes
-
-- Empty or `null` query params return `undefined` (won't break Prisma queries)
-- Invalid formats throw `BadRequestException` with clear error messages
-- All date values are automatically converted to ISO 8601 format
-- Nested properties use dot notation: `user.profile.name`
-- Multiple operators on the same field are merged automatically
-- Field references (`field()`) compare values between columns at query time
-- Field comparisons work with all comparison operators: `lt`, `lte`, `gt`, `gte`, `equals`, `not`
-
----
-
-### 🔥 Use Cases for Field Comparison
-
-| Scenario                    | Example                                         | Use Case                                      |
-| --------------------------- | ----------------------------------------------- | --------------------------------------------- |
-| Inventory Management        | `qty:lte field(recQty)`                         | Find items below recommended stock            |
-| Date Validation             | `startDate:lt field(endDate)`                   | Validate date ranges                          |
-| Price Range Validation      | `minPrice:lte field(maxPrice)`                  | Ensure price logic is correct                 |
-| Performance Tracking        | `actualValue:lt field(targetValue)`             | Find underperforming metrics                  |
-| Budget Management           | `spent:lte field(budget)`                       | Monitor spending limits                       |
-| Capacity Planning           | `currentCapacity:gte field(minRequired)`        | Ensure minimum requirements are met           |
-| Time Tracking               | `actualHours:gt field(estimatedHours)`          | Find tasks that exceeded estimates            |
-| Quality Control             | `defectRate:lte field(maxAllowedDefects)`       | Filter by quality thresholds                  |
+[↑ Back to top](#-table-of-contents)
 
 ---
 
 ## 2️⃣ OrderByPipe
 
-Convert query strings into **Prisma `orderBy` objects**.
+Convert query strings into **Prisma `orderBy` objects** with nested relation support.
 
 ```ts
 @Query('orderBy', OrderByPipe) orderBy?: Pipes.Order
@@ -808,46 +273,34 @@ Convert query strings into **Prisma `orderBy` objects**.
 
 ### 🧩 Examples
 
-### Flat Order
-
+#### Simple Sort
 ```url
 ?orderBy=createdAt:desc
 ```
-
 ```ts
-{
-  createdAt: "desc"
-}
+[{ createdAt: "desc" }]
 ```
 
-### Nested Order
-
+#### Nested Sort
 ```url
 ?orderBy=user.profile.name:asc
 ```
-
 ```ts
-{
-  user: {
-    profile: {
-      name: "asc"
-    }
-  }
-}
+[{ user: { profile: { name: "asc" } } }]
 ```
 
-### Multi-Nested Order
-
+#### Multiple Sorts
 ```url
-?orderBy=user.profile.name:asc,posts.comments.createdAt:desc
+?orderBy=user.profile.name:asc,createdAt:desc
+```
+```ts
+[
+  { user: { profile: { name: 'asc' } } },
+  { createdAt: 'desc' }
+]
 ```
 
-```ts
-{
-  user: { profile: { name: 'asc' } },
-  posts: { comments: { createdAt: 'desc' } }
-}
-```
+[↑ Back to top](#-table-of-contents)
 
 ---
 
@@ -863,19 +316,25 @@ Pick which fields to return.
 
 ```url
 ?select=id,firstName,lastName
-?select=-password
 ```
-
 ```ts
 { id: true, firstName: true, lastName: true }
+```
+
+```url
+?select=-password
+```
+```ts
 { password: false }
 ```
+
+[↑ Back to top](#-table-of-contents)
 
 ---
 
 ## 4️⃣ IncludePipe
 
-Include relations, with optional **nested includes & selects**.
+Include relations, with optional nested includes & selects.
 
 ```ts
 @Query('include', IncludePipe) include?: Pipes.Include
@@ -883,58 +342,367 @@ Include relations, with optional **nested includes & selects**.
 
 ### 🧩 Examples
 
-### Basic Include
-
+#### Basic Include
 ```url
 ?include=profile
 ```
-
 ```ts
-{
-  profile: true
-}
+{ profile: true }
 ```
 
-### Nested Include
-
+#### Nested Include
 ```url
 ?include=posts.comments
 ```
-
 ```ts
-{
-  posts: {
-    include: {
-      comments: true
-    }
-  }
-}
+{ posts: { include: { comments: true } } }
 ```
 
-### Include with Select
-
+#### Include with Select
 ```url
 ?include=profile.select:(id,firstName,lastName)
 ```
-
 ```ts
 { profile: { select: { id: true, firstName: true, lastName: true } } }
 ```
 
-### Multi-Nested Include
+[↑ Back to top](#-table-of-contents)
 
-```url
-?include=company.departments.select:(name,employees.select:(id,name))
+---
+
+## 5️⃣ AggregatePipe
+
+⭐ **NEW in v3.0.0** - Powerful aggregations with chart-ready transformations!
+
+Parse aggregate queries and transform results into chart-ready format with automatic time series support.
+
+```ts
+@Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate
 ```
 
+### 🎯 Query Format
+
+```
+aggregate=field1: function(params), field2: function(), chart: type(dateField, interval)
+```
+
+### ✅ Supported Functions
+
+| Function                    | Prisma Output | Description                  |
+| --------------------------- | ------------- | ---------------------------- |
+| `sum()`                     | `_sum`        | Sum of values                |
+| `avg()`                     | `_avg`        | Average of values            |
+| `min()`                     | `_min`        | Minimum value                |
+| `max()`                     | `_max`        | Maximum value                |
+| `count()` or `count(field)` | `_count`      | Count of records             |
+
+### 📊 Chart Types
+
+| Type   | Use Case                           |
+| ------ | ---------------------------------- |
+| `bar`  | Compare values across categories   |
+| `line` | Show trends over time              |
+| `pie`  | Show proportions                   |
+
+### 📅 Time Intervals
+
+| Interval | Description                    |
+| -------- | ------------------------------ |
+| `day`    | Group by day (365 data points) |
+| `month`  | Group by month (12 data points)|
+| `year`   | Group by year (5 data points)  |
+
+### 🧩 Examples
+
+#### 1. Simple Aggregation
+
+```url
+?aggregate=revenue: sum(), orders: count()
+```
+
+**Pipe Output:**
+```ts
+{
+  prismaQuery: {
+    _sum: { revenue: true },
+    _count: true
+  },
+  aggregates: [
+    { field: 'revenue', function: 'sum', params: [] },
+    { field: 'orders', function: 'count', params: [] }
+  ],
+  groupBy: [],
+  isGrouped: false
+}
+```
+
+**Usage in Service:**
+```ts
+const data = await prisma.order.aggregate(aggregate.prismaQuery);
+// { _sum: { revenue: 150000 }, _count: 42 }
+```
+
+#### 2. Monthly Revenue Chart
+
+```url
+?aggregate=revenue: sum(), chart: line(createdAt, month)
+```
+
+**Pipe Output:**
+```ts
+{
+  prismaQuery: {
+    by: ['createdAt'],
+    _sum: { revenue: true }
+  },
+  aggregates: [{ field: 'revenue', function: 'sum', params: [] }],
+  groupBy: ['createdAt'],
+  isGrouped: true,
+  chartType: 'line',
+  timeSeries: {
+    dateField: 'createdAt',
+    interval: 'month'
+  }
+}
+```
+
+**Usage in Service:**
+```ts
+const data = await prisma.order.groupBy({
+  by: ['createdAt'],
+  _sum: { revenue: true }
+});
+
+const chartData = AggregatePipe.toChartSeries(data, aggregate);
+// {
+//   categories: ['Jan 2025', 'Feb 2025', ..., 'Dec 2025'],
+//   series: [{
+//     name: 'sum(revenue)',
+//     data: [12000, 15000, 0, 18000, ...] // Gaps filled with 0
+//   }],
+//   chartType: 'line',
+//   raw: [...]
+// }
+```
+
+#### 3. Multiple Aggregates with Time Series
+
+```url
+?aggregate=revenue: sum(), orders: count(), avgPrice: avg(), chart: bar(orderDate, month)
+```
+
+**Chart Output:**
+```ts
+{
+  categories: ['Jan 2025', 'Feb 2025', ..., 'Dec 2025'],
+  series: [
+    { name: 'sum(revenue)', data: [12000, 15000, ...] },
+    { name: 'count(orders)', data: [45, 52, ...] },
+    { name: 'avg(avgPrice)', data: [266.67, 288.46, ...] }
+  ],
+  chartType: 'bar'
+}
+```
+
+#### 4. Filtered Aggregation (with WherePipe)
+
+```url
+?where=status: string(completed), createdAt: gte date(2025-01-01)&aggregate=total: sum(), chart: line(createdAt, month)
+```
+
+**Service Code:**
+```ts
+async getStats(
+  @Query('where', WherePipe) where?: Pipes.Where,
+  @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate
+) {
+  const data = await this.prisma.order.groupBy({
+    where, // Filter completed orders from 2025
+    ...aggregate.prismaQuery
+  });
+
+  return AggregatePipe.toChartSeries(data, aggregate);
+}
+```
+
+### 🎨 Chart Integration Examples
+
+#### With Recharts (React)
+```tsx
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+
+function RevenueChart({ data }: { data: Pipes.ChartSeries }) {
+  const chartData = data.categories.map((cat, i) => ({
+    name: cat,
+    ...data.series.reduce((acc, s) => ({
+      ...acc,
+      [s.name]: s.data[i]
+    }), {})
+  }));
+
+  return (
+    <LineChart width={800} height={400} data={chartData}>
+      <CartesianGrid strokeDasharray="3 3" />
+      <XAxis dataKey="name" />
+      <YAxis />
+      <Tooltip />
+      <Legend />
+      {data.series.map((s, i) => (
+        <Line key={i} type="monotone" dataKey={s.name} stroke={`#${i}82ca9d`} />
+      ))}
+    </LineChart>
+  );
+}
+```
+
+#### With Chart.js
+```ts
+import { Chart } from 'chart.js';
+
+function createChart(ctx: HTMLCanvasElement, data: Pipes.ChartSeries) {
+  return new Chart(ctx, {
+    type: data.chartType || 'bar',
+    data: {
+      labels: data.categories,
+      datasets: data.series.map(s => ({
+        label: s.name,
+        data: s.data,
+        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+        borderColor: 'rgba(75, 192, 192, 1)',
+        borderWidth: 1
+      }))
+    }
+  });
+}
+```
+
+### 🔥 Advanced Examples
+
+#### Sales Dashboard
+```url
+?where=status: string(paid)&aggregate=revenue: sum(), orders: count(), avgOrder: avg(), chart: line(paidAt, month)
+```
+
+#### Category Performance
+```url
+?where=category: in array(string(electronics), string(books))&aggregate=sales: sum(), units: count(), chart: bar(soldAt, month)
+```
+
+#### Year-over-Year Comparison
+```url
+?where=year: in array(int(2023), int(2025))&aggregate=revenue: sum(), chart: bar(createdAt, year)
+```
+
+### 💡 Best Practices
+
+1. **Use time series for trends** - Always specify `chart: type(dateField, interval)` for time-based data
+2. **Filter before aggregating** - Combine with WherePipe for filtered aggregations
+3. **Choose appropriate intervals**:
+   - `day` for detailed analysis (last 30 days)
+   - `month` for trends (last 12 months)
+   - `year` for long-term patterns
+4. **Multiple metrics** - Aggregate multiple fields to compare side-by-side
+5. **Frontend-ready** - Use `AggregatePipe.toChartSeries()` to get chart-ready data structure
+
+### ⚠️ Important Notes
+
+- Time series automatically fills gaps with 0 (e.g., if no data for March, value = 0)
+- Uses UTC timezone for consistent date handling
+- `isGrouped: true` requires `groupBy()`, `false` uses `aggregate()`
+- Chart metadata is optional - you can aggregate without charts
+- Raw Prisma data included in `raw` property for custom processing
+
+[↑ Back to top](#-table-of-contents)
+
+---
+
+## 🔍 Advanced Where Examples
+
+### 🔄 Field-to-Field Comparison
+
+**NEW in v2.2.0** - Compare values between columns in the same table!
+
+⚠️ **Important:** Requires service layer conversion using `convertFieldReferences()`
+
+```ts
+import { convertFieldReferences } from '@dwcahyo/nestjs-prisma-pipes';
+
+async findAll(@Query('where', WherePipe) whereFromPipe?: Pipes.Where) {
+  const where = convertFieldReferences(whereFromPipe, this.prisma.product);
+  return this.prisma.product.findMany({ where });
+}
+```
+
+#### Inventory Management
+```url
+?where=qty:lte field(recQty),status:string(active)
+```
+```ts
+// Find products below recommended quantity
+{
+  qty: { lte: prisma.product.fields.recQty },
+  status: "active"
+}
+```
+
+#### Date Validation
+```url
+?where=startDate:lt field(endDate)
+```
+```ts
+{
+  startDate: { lt: prisma.event.fields.endDate }
+}
+```
+
+### 📅 Date Range Support
+
+**NEW in v2.1.0** - Multiple operators on same field!
+
+#### Single Date Range
+```url
+?where=createdAt:gte date(2025-01-01),createdAt:lte date(2025-12-31)
+```
+```ts
+{
+  createdAt: {
+    gte: "2025-01-01T00:00:00.000Z",
+    lte: "2025-12-31T23:59:59.000Z"
+  }
+}
+```
+
+#### Multiple Date Ranges
+```url
+?where=createdAt:gte date(2025-01-01),createdAt:lte date(2025-12-31),updatedAt:gte date(2025-06-01)
+```
+```ts
+{
+  createdAt: {
+    gte: "2025-01-01T00:00:00.000Z",
+    lte: "2025-12-31T23:59:59.000Z"
+  },
+  updatedAt: {
+    gte: "2025-06-01T00:00:00.000Z"
+  }
+}
+```
+
+### 🔗 Nested Relations
+
+#### Deep Nesting
+```url
+?where=company.departments.every.employees.some.name:startsWith string(A)
+```
 ```ts
 {
   company: {
-    include: {
-      departments: {
-        select: {
-          name: true,
-          employees: { select: { id: true, name: true } }
+    departments: {
+      every: {
+        employees: {
+          some: {
+            name: { startsWith: "A" }
+          }
         }
       }
     }
@@ -942,188 +710,55 @@ Include relations, with optional **nested includes & selects**.
 }
 ```
 
----
+### 🎯 Real-World Examples
 
-## Combined Example
-
+#### E-commerce Product Search
 ```url
-/users?where=firstName:contains string(John),createdAt:gte date(2024-01-01),createdAt:lte date(2024-12-31)&orderBy=user.profile.name:asc&select=id,firstName&include=profile
+?where=category:string(Electronics),price:gte float(100),price:lte float(500),inStock:bool(true),tags:hasSome array(sale,featured)
 ```
 
-```ts
-{
-  where: {
-    firstName: { contains: 'John' },
-    createdAt: {
-      gte: '2024-01-01T00:00:00.000Z',
-      lte: '2024-12-31T23:59:59.000Z'
-    }
-  },
-  orderBy: { user: { profile: { name: 'asc' } } },
-  select: { id: true, firstName: true },
-  include: { profile: true }
-}
+#### Inventory Low Stock Alert
+```url
+?where=qty:lte field(recQty),status:string(active),lastRestocked:lte date(2025-01-01)
 ```
+
+#### Event Scheduling Validation
+```url
+?where=startDate:lt field(endDate),status:in array(scheduled,active),capacity:gte field(minParticipants)
+```
+
+[↑ Back to top](#-table-of-contents)
 
 ---
-
-## 5️⃣ AggregatePipe
-## 🎯 Query Format
-
-```
-aggregate=field1: function(params), field2: function(params), chart: type(dateField, interval)
-```
-
-### ✔ Supported functions
-
-| Function                    | Prisma Output |
-| --------------------------- | ------------- |
-| `sum()`                     | `_sum`        |
-| `avg()`                     | `_avg`        |
-| `min()`                     | `_min`        |
-| `max()`                     | `_max`        |
-| `count()` or `count(field)` | `_count`      |
-
----
-
-## 🎯 Chart Metadata (Optional)
-
-```
-chart: type(field, interval)
-```
-
-Examples:
-
-```
-chart: line(createdAt, month)
-chart: bar(orderDate, day)
-chart: pie
-chart: donut(status)
-```
-
-* `type` → line, bar, area, pie, donut
-* `field` → field used for date grouping (optional)
-* `interval` → day, week, month, quarter, year
-
-> Chart metadata is **not passed to Prisma**, but parsed by the pipe so the service layer can generate chart-ready datasets.
-
----
-
-## 📌 Examples
-
-### 1. Simple Aggregation
-
-```
-?aggregate=revenue: sum(), orders: count()
-```
-
-Output:
-
-```ts
-{
-  prisma: {
-    _sum: { revenue: true },
-    _count: { orders: true }
-  }
-}
-```
-
----
-
-### 2. Multiple Aggregations
-
-```
-?aggregate=price: avg(), quantity: sum()
-```
-
-```ts
-{
-  prisma: {
-    _avg: { price: true },
-    _sum: { quantity: true }
-  }
-}
-```
-
----
-
-### 3. With Chart Metadata
-
-```
-?aggregate=price: avg(), chart: bar(createdAt, month)
-```
-
-```ts
-{
-  prisma: {
-    _avg: { price: true }
-  },
-  chart: {
-    type: "bar",
-    field: "createdAt",
-    interval: "month"
-  }
-}
-```
-
----
-
-### 4. Date-based Line Chart
-
-```
-?aggregate=total: sum(), chart: line(orderDate, month)
-```
-
-```ts
-{
-  prisma: {
-    _sum: { total: true }
-  },
-  chart: {
-    type: "line",
-    field: "orderDate",
-    interval: "month"
-  }
-}
-```
-
----
-
-### 5. Count With Parameter
-
-```
-?aggregate=amount: sum(), status: count(id), chart: pie
-```
-
-```ts
-{
-  prisma: {
-    _sum: { amount: true },
-    _count: { id: true }
-  },
-  chart: {
-    type: "pie"
-  }
-}
-```
-
----
-
 
 ## 🗺 Roadmap – Next Pipes
 
-These are the upcoming pipes planned for future releases:
+| Pipe             | Description                                                       | Status     |
+| ---------------- | ----------------------------------------------------------------- | ---------- |
+| `DistinctPipe`   | Parse `distinct` query param into Prisma `distinct` array        | 🟡 Planned |
+| `PaginationPipe` | Parse `skip` & `take` (or `page` & `limit`) into pagination      | 🟡 Planned |
+| `HavingPipe`     | Support SQL-like `having` filters after grouping                 | 🟡 Planned |
+| `CountPipe`      | Shortcut to request `count` results alongside data               | 🟡 Planned |
 
-| Pipe             | Description                                                                | Status      |
-| ---------------- | -------------------------------------------------------------------------- | ----------- |
-| `DistinctPipe`   | Parse `distinct` query param into Prisma `distinct` array                  | 🟡 Planned  |
-| `PaginationPipe` | Parse `skip` & `take` (or `page` & `limit`) into Prisma pagination options | 🟡 Planned  |
-| `GroupByPipe`    | Parse `groupBy` queries into Prisma `groupBy` options (with aggregates)    | 🔵 Research |
-| `HavingPipe`     | Support SQL-like `having` filters after grouping                           | 🔵 Research |
-| `CountPipe`      | Shortcut to request `count` results alongside data                         | 🟡 Planned  |
 
-✅ Already Available: `WherePipe`, `OrderByPipe`, `SelectPipe`, `IncludePipe`, `AggregatePipe`
+✅ **Available Now:** `WherePipe`, `OrderByPipe`, `SelectPipe`, `IncludePipe`, `AggregatePipe`
+
+[↑ Back to top](#-table-of-contents)
+
+---
+
+## 📝 License
+
+MIT
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please feel free to submit a Pull Request.
 
 ---
 
 ✨ With `@dwcahyo/nestjs-prisma-pipes`, you write **less boilerplate** and let your users build **powerful dynamic queries** right from the URL.
+
+[↑ Back to top](#-table-of-contents)

@@ -9,27 +9,6 @@ const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'] as const;
 type AggregateFunction = typeof AGGREGATE_FUNCTIONS[number];
 
 /**
- * Supported chart types
- */
-export type ChartType = 'bar' | 'line' | 'pie';
-
-/**
- * Time interval for date series
- */
-export type TimeInterval = 'day' | 'month' | 'year';
-
-interface AggregateSpec {
-	field: string;
-	function: AggregateFunction;
-	params: string[];
-}
-
-interface TimeSeriesConfig {
-	dateField: string;
-	interval: TimeInterval;
-}
-
-/**
  * Parse aggregate function with parameters
  * @example "sum()" -> { function: 'sum', params: [] }
  * @example "count(id)" -> { function: 'count', params: ['id'] }
@@ -45,7 +24,7 @@ function parseAggregateFunction(value: string): {
 
 	const [, func, paramsStr] = match;
 	const params = paramsStr
-		? paramsStr.split(',').map(p => p.trim()).filter(Boolean).map(p => p === '*' ? '*' : p)
+		? paramsStr.split(',').map(p => p.trim()).filter(Boolean)
 		: [];
 
 	return {
@@ -59,15 +38,17 @@ function parseAggregateFunction(value: string): {
  * @example "bar(createdAt, month)" -> { type: 'bar', dateField: 'createdAt', interval: 'month' }
  */
 function parseChartConfig(value: string): {
-	type: ChartType;
+	type: Pipes.ChartType;
 	dateField?: string;
-	interval?: TimeInterval;
+	interval?: Pipes.TimeInterval;
 } | null {
 	if (!value || typeof value !== 'string') return null;
 
+	const chartTypes: Pipes.ChartType[] = ['bar', 'line', 'pie'];
+
 	// Simple chart type without time series
-	if (['bar', 'line', 'pie'].includes(value.toLowerCase())) {
-		return { type: value.toLowerCase() as ChartType };
+	if (chartTypes.includes(value.toLowerCase() as Pipes.ChartType)) {
+		return { type: value.toLowerCase() as Pipes.ChartType };
 	}
 
 	// Chart with time series: bar(createdAt, month)
@@ -78,17 +59,16 @@ function parseChartConfig(value: string): {
 	const [, type, dateField, interval] = match;
 
 	return {
-		type: type.toLowerCase() as ChartType,
+		type: type.toLowerCase() as Pipes.ChartType,
 		dateField: dateField.trim(),
-		interval: (interval?.toLowerCase() as TimeInterval) || 'month',
+		interval: (interval?.toLowerCase() as Pipes.TimeInterval) || 'month',
 	};
 }
 
 /**
  * Generate time series labels
  */
-function generateTimeSeriesLabels(interval: TimeInterval, year?: number): string[] {
-	// if year provided use it, otherwise fallback to current year
+function generateTimeSeriesLabels(interval: Pipes.TimeInterval, year?: number): string[] {
 	const currentYear = year || new Date().getFullYear();
 	const labels: string[] = [];
 
@@ -106,7 +86,6 @@ function generateTimeSeriesLabels(interval: TimeInterval, year?: number): string
 			break;
 		case 'month':
 			for (let i = 0; i < 12; i++) {
-				// Use UTC to keep determinism across environments
 				const date = new Date(Date.UTC(currentYear, i, 1));
 				labels.push(date.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }));
 			}
@@ -123,23 +102,19 @@ function generateTimeSeriesLabels(interval: TimeInterval, year?: number): string
 }
 
 /**
- * Get time key from date
- * Normalize dates to match label format
+ * Get time key from date - normalize dates to match label format
  */
-function getTimeKey(date: Date | string, interval: TimeInterval): string {
-	// Normalize to Date
+function getTimeKey(date: Date | string, interval: Pipes.TimeInterval): string {
 	const d = date instanceof Date ? date : new Date(date);
 
 	switch (interval) {
 		case 'day': {
-			// Format: YYYY-MM-DD (use UTC components for determinism)
 			const year = d.getUTCFullYear();
 			const month = String(d.getUTCMonth() + 1).padStart(2, '0');
 			const day = String(d.getUTCDate()).padStart(2, '0');
 			return `${year}-${month}-${day}`;
 		}
 		case 'month': {
-			// Normalize to first day of month and format 'Mon YYYY' using UTC
 			const normalized = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 			return normalized.toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 		}
@@ -151,20 +126,18 @@ function getTimeKey(date: Date | string, interval: TimeInterval): string {
 /**
  * Build Prisma aggregate object
  */
-function buildPrismaAggregate(aggregates: AggregateSpec[]): any {
-	const aggregateObj: any = {};
+function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string, any> {
+	const aggregateObj: Record<string, any> = {};
 
 	for (const agg of aggregates) {
 		const { function: func, field, params } = agg;
 		const funcKey = `_${func}`;
 
 		if (func === 'count') {
-			// if params indicates wildcard or no params -> global count
 			if (!params || params.length === 0 || params[0] === '*') {
 				aggregateObj._count = true;
 			} else {
 				aggregateObj._count = aggregateObj._count || {};
-				// Use the grouped-by field as the key in _count (keep behavior consistent with tests)
 				aggregateObj._count[field] = true;
 			}
 		} else {
@@ -181,19 +154,13 @@ function buildPrismaAggregate(aggregates: AggregateSpec[]): any {
  */
 function transformToChartSeries(
 	data: any[],
-	aggregates: AggregateSpec[],
-	chartConfig?: { type: ChartType; dateField?: string; interval?: TimeInterval },
+	aggregates: Pipes.AggregateSpec[],
+	chartConfig?: { type: Pipes.ChartType; dateField?: string; interval?: Pipes.TimeInterval },
 	groupBy?: string[],
-): {
-	categories: string[];
-	series: Array<{ name: string; data: number[] }>;
-	chartType?: ChartType;
-	raw: any[];
-} {
-	// Ensure we have an array
+): Pipes.ChartSeries {
 	const dataArray = Array.isArray(data) ? data : [];
 
-	// Empty data handling: return zeroed series
+	// Empty data handling
 	if (!dataArray || dataArray.length === 0) {
 		const series = aggregates.map(agg => ({
 			name: `${agg.function}(${agg.field})`,
@@ -208,9 +175,8 @@ function transformToChartSeries(
 		};
 	}
 
-	// Time series chart (grouped by a date field)
+	// Time series chart
 	if (chartConfig?.dateField && chartConfig?.interval) {
-		// Derive year from data if possible for stable labels (use min year)
 		let year: number | undefined;
 		try {
 			const dates = dataArray
@@ -221,14 +187,13 @@ function transformToChartSeries(
 				const minYear = Math.min(...dates.map(d => d.getUTCFullYear()));
 				year = minYear;
 			}
-		} catch (err) {
+		} catch {
 			year = undefined;
 		}
 
 		const timeLabels = generateTimeSeriesLabels(chartConfig.interval, year);
 		const dataMap = new Map<string, any[]>();
 
-		// For each data item, compute its key and push into array (support multiple per period)
 		dataArray.forEach(item => {
 			const dateValue = item[chartConfig.dateField!];
 			if (dateValue) {
@@ -240,8 +205,7 @@ function transformToChartSeries(
 			}
 		});
 
-		// Build series with all time labels. If multiple items in a period, aggregate them by summing
-		const series = aggregates.map((agg: AggregateSpec) => {
+		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 			const { function: func, field } = agg;
 			const seriesName = `${func}(${field})`;
 
@@ -249,9 +213,7 @@ function transformToChartSeries(
 				const items = dataMap.get(label);
 				if (!items || items.length === 0) return 0;
 
-				// When we have multiple rows per period, combine them
 				if (func === 'count') {
-					// items may have _count numeric or _count object
 					return items.reduce((acc, it) => {
 						const val = typeof it._count === 'number' ? it._count : (it._count?.[field] || it._count || 0);
 						return acc + (typeof val === 'number' ? val : 0);
@@ -275,19 +237,18 @@ function transformToChartSeries(
 		};
 	}
 
-	// Grouped (non-time-series) chart: use groupBy first field as category key if available
+	// Grouped (non-time-series) chart
 	if (groupBy && groupBy.length > 0) {
 		const groupField = groupBy[0];
 		const categories = dataArray.map(item => {
-			// convert Date to string for category if necessary
 			const val = item[groupField];
 			if (val instanceof Date) {
-				return getTimeKey(val, 'day'); // fallback representation for dates (YYYY-MM-DD)
+				return getTimeKey(val, 'day');
 			}
 			return String(val);
 		});
 
-		const series = aggregates.map((agg: AggregateSpec) => {
+		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 			const { function: func, field } = agg;
 			const seriesName = `${func}(${field})`;
 
@@ -309,10 +270,10 @@ function transformToChartSeries(
 		};
 	}
 
-	// Regular chart (no time series, no groupBy) - fallback: categories from data index
+	// Regular chart (no grouping)
 	const categories = dataArray.map((_, idx) => `Category ${idx + 1}`);
 
-	const series = aggregates.map((agg: AggregateSpec) => {
+	const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 		const { function: func, field } = agg;
 		const seriesName = `${func}(${field})`;
 
@@ -356,18 +317,16 @@ export default class AggregatePipe implements PipeTransform {
 		if (!value || value.trim() === '') return undefined;
 
 		try {
-			// Parse using existing parseObjectLiteral utility
 			const parsed = parseObjectLiteral(value);
 
 			if (!parsed || parsed.length === 0) {
 				throw new BadRequestException('Invalid aggregate query format');
 			}
 
-			const aggregates: AggregateSpec[] = [];
-			let chartConfig: { type: ChartType; dateField?: string; interval?: TimeInterval } | undefined;
+			const aggregates: Pipes.AggregateSpec[] = [];
+			let chartConfig: { type: Pipes.ChartType; dateField?: string; interval?: Pipes.TimeInterval } | undefined;
 
 			for (const [key, val] of parsed) {
-				// Parse chart configuration
 				if (key === 'chart' && val) {
 					const config = parseChartConfig(val);
 					if (config) {
@@ -376,7 +335,6 @@ export default class AggregatePipe implements PipeTransform {
 					}
 				}
 
-				// Parse aggregate function
 				if (val) {
 					const aggFunc = parseAggregateFunction(val);
 					if (aggFunc) {
@@ -393,15 +351,11 @@ export default class AggregatePipe implements PipeTransform {
 				throw new BadRequestException('At least one aggregate function is required');
 			}
 
-			// Build Prisma query
 			const prismaQuery = buildPrismaAggregate(aggregates);
-
-			// If chart has time series, we need groupBy
 			const groupBy = chartConfig?.dateField ? [chartConfig.dateField] : [];
 			const isGrouped = groupBy.length > 0;
 
 			if (isGrouped) {
-				// Add groupBy to query
 				return {
 					prismaQuery: {
 						by: groupBy,
@@ -434,44 +388,19 @@ export default class AggregatePipe implements PipeTransform {
 
 	/**
 	 * Transform Prisma result to chart-ready format
-	 * Call this in your service after executing Prisma query
 	 *
 	 * @example
-	 * // Basic usage with aggregate only
 	 * const config = aggregatePipe.transform(query.aggregate);
 	 * const data = await prisma.model.aggregate(config.prismaQuery);
 	 * const chartData = AggregatePipe.toChartSeries(data, config);
-	 *
-	 * @example
-	 * // Combined with where pipe
-	 * const whereConfig = wherePipe.transform(query.where);
-	 * const aggregateConfig = aggregatePipe.transform(query.aggregate);
-	 *
-	 * const data = aggregateConfig.isGrouped
-	 *   ? await prisma.model.groupBy({
-	 *       where: whereConfig,
-	 *       ...aggregateConfig.prismaQuery
-	 *     })
-	 *   : await prisma.model.aggregate({
-	 *       where: whereConfig,
-	 *       ...aggregateConfig.prismaQuery
-	 *     });
-	 *
-	 * const chartData = AggregatePipe.toChartSeries(data, aggregateConfig);
 	 */
 	static toChartSeries(
 		data: any[] | any,
 		aggregateConfig: Pipes.Aggregate,
-	): {
-		categories: string[];
-		series: Array<{ name: string; data: number[] }>;
-		chartType?: ChartType;
-		raw: any[];
-	} {
-		// Build chartConfig object used by transformToChartSeries
+	): Pipes.ChartSeries {
 		const chartConfig = aggregateConfig.timeSeries
 			? {
-				type: (aggregateConfig.chartType || 'bar') as ChartType,
+				type: (aggregateConfig.chartType || 'bar') as Pipes.ChartType,
 				dateField: aggregateConfig.timeSeries.dateField,
 				interval: aggregateConfig.timeSeries.interval,
 			}
@@ -479,12 +408,10 @@ export default class AggregatePipe implements PipeTransform {
 				? { type: aggregateConfig.chartType }
 				: undefined;
 
-		// Handle non-grouped aggregate (single result)
+		// Handle non-grouped aggregate
 		if (!aggregateConfig.isGrouped) {
-			// data could be {} or []
 			if (!data || (Array.isArray(data) && data.length === 0)) {
-				// return zeroed series
-				const series = aggregateConfig.aggregates.map((agg: AggregateSpec) => ({
+				const series = aggregateConfig.aggregates.map((agg: Pipes.AggregateSpec) => ({
 					name: `${agg.function}(${agg.field})`,
 					data: [0],
 				}));
@@ -497,7 +424,7 @@ export default class AggregatePipe implements PipeTransform {
 				};
 			}
 
-			const series = aggregateConfig.aggregates.map((agg: AggregateSpec) => {
+			const series = aggregateConfig.aggregates.map((agg: Pipes.AggregateSpec) => {
 				const { function: func, field } = agg;
 				const seriesName = `${func}(${field})`;
 
@@ -523,9 +450,8 @@ export default class AggregatePipe implements PipeTransform {
 			};
 		}
 
-		// Handle grouped aggregate (array) - delegate to transformToChartSeries
+		// Handle grouped aggregate
 		const dataArray = Array.isArray(data) ? data : [data];
-
 		return transformToChartSeries(dataArray, aggregateConfig.aggregates, chartConfig, aggregateConfig.groupBy);
 	}
 }
