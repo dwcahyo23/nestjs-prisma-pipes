@@ -32,7 +32,7 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
 
 ## 📜 Changelog
 
-### [2.4.1] - 2025
+### [2.4.2] - 2025
 
 #### 🚀 Enhanced - Grouped Time Series Support
 
@@ -46,7 +46,7 @@ npm install --save @dwcahyo/nestjs-prisma-pipes
   **Example - Sales per Category Over Time:**
   ```url
   ?where=category: in array(COM,O4W,O2W,OES,EXX)
-  &aggregate=qty: sum(), groupBy(category, createdAt), chart: line(createdAt, month)
+  &aggregate=qty: sum(), groupBy: (category, createdAt), chart: line(createdAt, month)
   ```
   
   **Result:**
@@ -244,7 +244,7 @@ export class UserService {
 
     // Promise pattern for cleaner async flow
     const dataPromise = aggregate.isGrouped
-      ? this.prisma.order.groupBy({
+      ? this.prisma.order.groupBy: ({
           where,
           ...aggregate.prismaQuery,
         })
@@ -467,7 +467,7 @@ Parse aggregate queries and transform results into chart-ready format with autom
 ### 🎯 Query Format
 
 ```
-aggregate=field1: function(params), field2: function(), groupBy(field1, field2), chart: type(options)
+aggregate=field1: function(params), field2: function(), groupBy: (field1, field2), chart: type(options)
 ```
 
 ### ✅ Supported Functions
@@ -568,7 +568,7 @@ async getStats(@Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate) {
 
 ```url
 ?where=marketingMasterCategory.category: in array(COM,O4W,O2W,OES,EXX)
-&aggregate=qty: sum(), recQty: sum(), groupBy(marketingMasterCategory.category), chart: bar
+&aggregate=qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category), chart: bar
 ```
 
 **What This Does:**
@@ -609,7 +609,7 @@ Legend: ■ sum(qty)  ■ sum(recQty)
 
 ```url
 ?where=marketingMasterCategory.category: in array(COM,O4W,O2W,OES,EXX)
-&aggregate=qty: sum(), groupBy(marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
+&aggregate=qty: sum(), groupBy: (marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
 ```
 
 **What This Does:**
@@ -653,7 +653,7 @@ Legend:
 #### 4. Multiple Metrics per Category Over Time
 
 ```url
-?aggregate=qty: sum(), recQty: sum(), groupBy(category, createdAt), chart: line(createdAt, month)
+?aggregate=qty: sum(), recQty: sum(), groupBy: (category, createdAt), chart: line(createdAt, month)
 ```
 
 **Result:**
@@ -669,7 +669,7 @@ Legend:
 #### 5. Stacked Area Chart (Market Share Evolution)
 
 ```url
-?aggregate=revenue: sum(), groupBy(category, createdAt), chart: area(createdAt, month, stacked)
+?aggregate=revenue: sum(), groupBy: (category, createdAt), chart: area(createdAt, month, stacked)
 ```
 
 **Visual Result:**
@@ -694,7 +694,7 @@ Legend: ░ Category A  ▒ Category B  ▓ Category C
 #### 6. Horizontal Bar (Better for Many Categories)
 
 ```url
-?aggregate=qty: sum(), groupBy(marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
+?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
 ```
 
 **Visual Result:**
@@ -727,7 +727,7 @@ export class OrderService {
     where: Pipes.Where,
     aggregate: Pipes.Aggregate
   ): Promise<Pipes.ChartSeries> {
-    return this.prisma.order.groupBy({
+    return this.prisma.order.groupBy: ({
       where, // Filter completed orders from 2024
       ...aggregate.prismaQuery
     }).then(data => AggregatePipe.toChartSeries(data, aggregate));
@@ -812,21 +812,21 @@ function createGroupedTimeSeriesChart(ctx: HTMLCanvasElement, data: Pipes.ChartS
 #### 1. E-commerce Dashboard
 ```url
 ?where=status: string(paid)
-&aggregate=revenue: sum(), orders: count(), avgOrder: avg(), groupBy(category, paidAt), chart: line(paidAt, month)
+&aggregate=revenue: sum(), orders: count(), avgOrder: avg(), groupBy: (category, paidAt), chart: line(paidAt, month)
 ```
 
 **Use Case:** Track revenue, order count, and average order value per category monthly
 
 #### 2. Regional Sales Performance
 ```url
-?aggregate=sales: sum(), groupBy(region, createdAt), chart: area(createdAt, month, stacked)
+?aggregate=sales: sum(), groupBy: (region, createdAt), chart: area(createdAt, month, stacked)
 ```
 
 **Use Case:** See market share evolution across regions
 
 #### 3. Product Category Ranking
 ```url
-?aggregate=units: sum(), groupBy(category), chart: bar(category, horizontal)
+?aggregate=units: sum(), groupBy: (category), chart: bar(category, horizontal)
 ```
 
 **Use Case:** Rank categories by total units sold (easy to read with horizontal bars)
@@ -834,7 +834,7 @@ function createGroupedTimeSeriesChart(ctx: HTMLCanvasElement, data: Pipes.ChartS
 #### 4. Multi-Product Trend Analysis
 ```url
 ?where=productId: in array(101,102,103,104,105)
-&aggregate=qty: sum(), revenue: sum(), groupBy(productId, orderDate), chart: line(orderDate, month)
+&aggregate=qty: sum(), revenue: sum(), groupBy: (productId, orderDate), chart: line(orderDate, month)
 ```
 
 **Use Case:** Compare 5 products' performance over time (10 lines: 2 metrics × 5 products)
@@ -842,7 +842,7 @@ function createGroupedTimeSeriesChart(ctx: HTMLCanvasElement, data: Pipes.ChartS
 #### 5. Seasonal Pattern Detection
 ```url
 ?where=year: in array(int(2023), int(2024))
-&aggregate=revenue: sum(), groupBy(category, createdAt), chart: line(createdAt, month)
+&aggregate=revenue: sum(), groupBy: (category, createdAt), chart: line(createdAt, month)
 ```
 
 **Use Case:** Compare this year vs last year patterns per category
@@ -885,7 +885,7 @@ function createGroupedTimeSeriesChart(ctx: HTMLCanvasElement, data: Pipes.ChartS
 - **Grouped Time Series** requires groupBy with both category field AND date field
 - Time series automatically fills gaps with 0 (e.g., if no data for March, value = 0)
 - Uses UTC timezone for consistent date handling
-- `isGrouped: true` requires Prisma `groupBy()`, `false` uses `aggregate()`
+- `isGrouped: true` requires Prisma `groupBy: ()`, `false` uses `aggregate()`
 - Chart metadata is optional - you can aggregate without charts
 - Raw Prisma data included in `raw` property for custom processing
 - Series names format: `"GroupValue - function(field)"` for grouped time series
@@ -894,7 +894,7 @@ function createGroupedTimeSeriesChart(ctx: HTMLCanvasElement, data: Pipes.ChartS
 
 | Feature | Regular Time Series | Grouped Time Series |
 |---------|-------------------|-------------------|
-| Query | `chart: line(createdAt, month)` | `groupBy(category, createdAt), chart: line(createdAt, month)` |
+| Query | `chart: line(createdAt, month)` | `groupBy: (category, createdAt), chart: line(createdAt, month)` |
 | Series Count | 1 per aggregate | N × aggregates (N = number of groups) |
 | Use Case | Overall trend | Compare trends across groups |
 | Example | Total monthly revenue | Revenue per category monthly |
@@ -910,7 +910,7 @@ function createGroupedTimeSeriesChart(ctx: HTMLCanvasElement, data: Pipes.ChartS
 
 **Grouped:**
 ```url
-?aggregate=revenue: sum(), groupBy(category, createdAt), chart: line(createdAt, month)
+?aggregate=revenue: sum(), groupBy: (category, createdAt), chart: line(createdAt, month)
 ```
 → N lines (one per category) showing revenue trend for each category
 
@@ -1032,7 +1032,7 @@ async findAll(@Query('where', WherePipe) whereFromPipe?: Pipes.Where) {
 #### Aggregate + Where: Category Performance Analysis
 ```url
 ?where=marketingMasterCategory.category:in array(COM,O4W,O2W,OES,EXX),createdAt:gte date(2024-01-01)
-&aggregate=qty:sum(),revenue:sum(),groupBy(marketingMasterCategory.category,createdAt),chart:line(createdAt,month)
+&aggregate=qty:sum(),revenue:sum(),groupBy: (marketingMasterCategory.category,createdAt),chart:line(createdAt,month)
 ```
 
 **What This Does:**
@@ -1191,7 +1191,7 @@ export class OrderService {
     }
 
     return this.prisma.order
-      .groupBy({
+      .groupBy: ({
         where,
         ...aggregate.prismaQuery,
       })
@@ -1207,7 +1207,7 @@ export class OrderService {
     }
 
     return this.prisma.order
-      .groupBy({
+      .groupBy: ({
         where,
         ...aggregate.prismaQuery,
       })
@@ -1223,7 +1223,7 @@ export class OrderService {
     }
 
     return this.prisma.order
-      .groupBy({
+      .groupBy: ({
         where,
         ...aggregate.prismaQuery,
       })
@@ -1252,7 +1252,7 @@ GET /orders/stats/total?where=createdAt:gte date(2024-01-01)&aggregate=revenue:s
 
 #### 2. Revenue by Category
 ```bash
-GET /orders/stats/by-category?where=status:string(completed)&aggregate=revenue:sum(),orders:count(),groupBy(category),chart:bar(category,horizontal)
+GET /orders/stats/by-category?where=status:string(completed)&aggregate=revenue:sum(),orders:count(),groupBy: (category),chart:bar(category,horizontal)
 ```
 
 **Response:**
@@ -1287,7 +1287,7 @@ GET /orders/stats/trends?where=createdAt:gte date(2024-01-01)&aggregate=revenue:
 
 #### 4. 🚀 Category Performance Over Time (NEW!)
 ```bash
-GET /orders/stats/category-trends?where=category:in array(Electronics,Books,Clothing)&aggregate=revenue:sum(),groupBy(category,createdAt),chart:line(createdAt,month)
+GET /orders/stats/category-trends?where=category:in array(Electronics,Books,Clothing)&aggregate=revenue:sum(),groupBy: (category,createdAt),chart:line(createdAt,month)
 ```
 
 **Response:**
@@ -1305,7 +1305,7 @@ GET /orders/stats/category-trends?where=category:in array(Electronics,Books,Clot
 
 #### 5. Market Share Evolution (Stacked Area)
 ```bash
-GET /orders/stats/category-trends?where=status:string(completed)&aggregate=revenue:sum(),groupBy(category,createdAt),chart:area(createdAt,month,stacked)
+GET /orders/stats/category-trends?where=status:string(completed)&aggregate=revenue:sum(),groupBy: (category,createdAt),chart:area(createdAt,month,stacked)
 ```
 
 **Response:**

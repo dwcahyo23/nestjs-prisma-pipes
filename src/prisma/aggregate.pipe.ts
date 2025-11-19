@@ -35,17 +35,25 @@ function parseAggregateFunction(value: string): {
 
 /**
  * Parse groupBy configuration
- * @example "groupBy(category)" -> ['category']
- * @example "groupBy(category, region)" -> ['category', 'region']
- * @example "groupBy(marketingMasterCategory.category)" -> ['marketingMasterCategory.category']
+ * Handles format: "(category)" or "(category, region)"
+ * 
+ * @example "(category)" -> ['category']
+ * @example "(category, region)" -> ['category', 'region']
+ * @example "(marketingMasterCategory.category)" -> ['marketingMasterCategory.category']
  */
 function parseGroupBy(value: string): string[] | null {
 	if (!value || typeof value !== 'string') return null;
 
-	const match = /^groupBy\(([^)]+)\)$/i.exec(value.trim());
-	if (!match) return null;
+	const trimmed = value.trim();
 
-	const [, fields] = match;
+	// Must be wrapped in parentheses
+	if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) {
+		return null;
+	}
+
+	const fields = trimmed.slice(1, -1); // Remove ( and )
+	if (!fields.trim()) return null;
+
 	return fields.split(',').map(f => f.trim()).filter(Boolean);
 }
 
@@ -442,7 +450,7 @@ function transformToChartSeries(
 /**
  * @description Parse aggregate query string with flexible grouping and advanced chart options
  *
- * Format: aggregate=field1: sum(), field2: count(), groupBy(field), chart: type(options)
+ * Format: aggregate=field1: sum(), field2: count(), groupBy: (field), chart: type(options)
  *
  * Examples:
  * 
@@ -450,71 +458,25 @@ function transformToChartSeries(
  *    aggregate=qty: sum(), recQty: sum()
  *
  * 2. Grouped aggregation (sum per category):
- *    aggregate=qty: sum(), recQty: sum(), groupBy(marketingMasterCategory.category)
+ *    aggregate=qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category)
  *
- * 3. Grouped with simple bar chart:
- *    aggregate=qty: sum(), recQty: sum(), groupBy(marketingMasterCategory.category), chart: bar
+ * 3. Multiple groupBy fields:
+ *    aggregate=qty: sum(), groupBy: (category, region)
  *
- * 4. Chart dengan groupField eksplisit:
- *    aggregate=qty: sum(), recQty: sum(), groupBy(category, region), chart: bar(category)
- *    (akan group by category & region, tapi chart categories menggunakan category)
+ * 4. Grouped with simple bar chart:
+ *    aggregate=qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category), chart: bar
  *
- * 5. Horizontal bar chart:
- *    aggregate=qty: sum(), groupBy(marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
+ * 5. Chart with explicit groupField:
+ *    aggregate=qty: sum(), recQty: sum(), groupBy: (category, region), chart: bar(category)
  *
- * 6. Stacked bar chart (multiple series stacked):
- *    aggregate=qty: sum(), recQty: sum(), groupBy(category), chart: bar(category, stacked)
+ * 6. Horizontal bar chart:
+ *    aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
  *
- * 7. Pie chart per category:
- *    aggregate=revenue: sum(), groupBy(marketingMasterCategory.category), chart: pie(marketingMasterCategory.category)
- *
- * 8. Donut chart:
- *    aggregate=qty: sum(), groupBy(category), chart: donut(category)
- *
- * 9. Area chart:
- *    aggregate=revenue: sum(), groupBy(category), chart: area(category)
- *
- * 10. Time series line chart:
+ * 7. Time series line chart:
  *     aggregate=revenue: sum(), chart: line(createdAt, month)
  *
- * 11. Stacked area chart dengan time series:
- *     aggregate=qty: sum(), recQty: sum(), chart: area(createdAt, month)
- *
- * 12. GROUPED TIME SERIES - trend per category over time:
- *     aggregate=qty: sum(), groupBy(marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
- *     Result: Separate line for each category showing trend over months
- *
- * 13. Stacked time series per category:
- *     aggregate=revenue: sum(), groupBy(category, createdAt), chart: area(createdAt, month, stacked)
- *     Result: Stacked area showing each category's contribution over time
- *
- * 14. Multiple categories trend comparison:
- *     aggregate=qty: sum(), recQty: sum(), groupBy(category, createdAt), chart: line(createdAt, month)
- *     Result: Multiple lines per category (category1-qty, category1-recQty, category2-qty, etc.)
- *
- * Combined with where filter:
- * ?where=marketingMasterCategory.category: in array(COM,O4W,O2W,OES,EXX)
- * &aggregate=qty: sum(), recQty: sum(), groupBy(marketingMasterCategory.category), chart: bar(marketingMasterCategory.category)
- *
- * This will return:
- * - Sum of qty and recQty for EACH category (COM, O4W, O2W, OES, EXX)
- * - Chart with categories: ["COM", "O4W", "O2W", "OES", "EXX"]
- * - Series: [{ name: "sum(qty)", data: [...] }, { name: "sum(recQty)", data: [...] }]
- *
- * GROUPED TIME SERIES example:
- * ?where=marketingMasterCategory.category: in array(COM,O4W,O2W,OES,EXX)
- * &aggregate=qty: sum(), groupBy(marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
- *
- * This will return:
- * - Time series with monthly labels: ["Jan 2024", "Feb 2024", ...]
- * - Separate line for EACH category: 
- *   [
- *     { name: "COM - sum(qty)", data: [10, 20, 15, ...] },
- *     { name: "O4W - sum(qty)", data: [30, 25, 40, ...] },
- *     { name: "O2W - sum(qty)", data: [15, 18, 22, ...] },
- *     ...
- *   ]
- * - Perfect for comparing trends across categories!
+ * 8. GROUPED TIME SERIES - trend per category over time:
+ *     aggregate=qty: sum(), groupBy: (marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
  *
  * @returns Prisma aggregate config with groupBy and chart visualization support
  */
@@ -536,7 +498,7 @@ export default class AggregatePipe implements PipeTransform {
 
 			for (const [key, val] of parsed) {
 				// Handle chart configuration
-				if (key === 'chart' && val) {
+				if (key.toLowerCase() === 'chart' && val) {
 					const config = parseChartConfig(val);
 					if (config) {
 						chartConfig = config;
@@ -545,11 +507,21 @@ export default class AggregatePipe implements PipeTransform {
 				}
 
 				// Handle groupBy configuration
-				if (key === 'groupBy' && val) {
-					const fields = parseGroupBy(val);
-					if (fields && fields.length > 0) {
-						groupByFields = fields;
-						continue;
+				if (key.toLowerCase() === 'groupby') {
+					if (val) {
+						const fields = parseGroupBy(val);
+						if (fields && fields.length > 0) {
+							groupByFields = fields;
+							continue;
+						} else {
+							throw new BadRequestException(
+								'Invalid groupBy format. Use: groupBy: (field) or groupBy: (field1, field2)'
+							);
+						}
+					} else {
+						throw new BadRequestException(
+							'groupBy requires fields. Use: groupBy: (field) or groupBy: (field1, field2)'
+						);
 					}
 				}
 
@@ -573,7 +545,7 @@ export default class AggregatePipe implements PipeTransform {
 			const prismaQuery = buildPrismaAggregate(aggregates);
 
 			// Determine groupBy priority:
-			// 1. Explicit groupBy() takes precedence
+			// 1. Explicit groupBy: (fields) takes precedence
 			// 2. Chart's groupField if specified
 			// 3. Chart's dateField for time series
 			let finalGroupBy: string[] = [];
@@ -616,11 +588,6 @@ export default class AggregatePipe implements PipeTransform {
 
 	/**
 	 * Transform Prisma result to chart-ready format
-	 *
-	 * @example
-	 * const config = aggregatePipe.transform(query.aggregate);
-	 * const data = await prisma.model.groupBy(config.prismaQuery);
-	 * const chartData = AggregatePipe.toChartSeries(data, config);
 	 */
 	static toChartSeries(
 		data: any[] | any,
