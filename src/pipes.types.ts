@@ -118,7 +118,7 @@ export namespace Pipes {
 	/**
 	 * Supported chart types
 	 */
-	export type ChartType = 'bar' | 'line' | 'pie';
+	export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'donut';
 
 	/**
 	 * Time intervals for time series
@@ -140,7 +140,19 @@ export namespace Pipes {
 	}
 
 	/**
-	 * Time series configuration
+	 * Chart configuration with advanced options
+	 */
+	export interface ChartConfig {
+		type: ChartType;
+		groupField?: string;        // Field to use for chart categories
+		dateField?: string;         // For time series charts
+		interval?: TimeInterval;    // Time interval for time series
+		stacked?: boolean;          // Stack multiple series
+		horizontal?: boolean;       // Horizontal orientation (for bar charts)
+	}
+
+	/**
+	 * Time series configuration (deprecated, use ChartConfig)
 	 */
 	export interface TimeSeriesConfig {
 		dateField: string;
@@ -153,15 +165,18 @@ export namespace Pipes {
 	export interface Aggregate {
 		prismaQuery: {
 			by?: string[];
-			_sum?: Record<string, boolean>;
-			_avg?: Record<string, boolean>;
-			_min?: Record<string, boolean>;
-			_max?: Record<string, boolean>;
-			_count?: boolean | Record<string, boolean>;
+			_sum?: Record<string, true>;
+			_avg?: Record<string, true>;
+			_min?: Record<string, true>;
+			_max?: Record<string, true>;
+			_count?: true | Record<string, true>;
 		};
 		aggregates: AggregateSpec[];
 		groupBy: string[];
 		isGrouped: boolean;
+		chartConfig?: ChartConfig;
+
+		// Deprecated fields (kept for backward compatibility)
 		chartType?: ChartType;
 		timeSeries?: TimeSeriesConfig;
 	}
@@ -170,13 +185,15 @@ export namespace Pipes {
 	 * Chart series data structure
 	 */
 	export interface ChartSeries {
-		categories: string[];
+		categories: string[];              // X-axis labels
 		series: Array<{
-			name: string;
-			data: number[];
+			name: string;                  // Series name (e.g., "sum(qty)")
+			data: number[];                // Data points
 		}>;
-		chartType?: ChartType;
-		raw: any[];
+		chartType?: ChartType;             // Type of chart to render
+		stacked?: boolean;                 // Whether to stack series
+		horizontal?: boolean;              // Whether chart is horizontal
+		raw: any[];                        // Original Prisma data
 	}
 
 	// ============================================
@@ -186,11 +203,11 @@ export namespace Pipes {
 	/**
 	 * Pagination configuration
 	 */
-	// export interface Pagination {
-	// 	take?: number;
-	// 	skip?: number;
-	// 	cursor?: Record<string, any>;
-	// }
+	export interface Pagination {
+		take?: number;
+		skip?: number;
+		cursor?: Record<string, any>;
+	}
 
 	// ============================================
 	// COMPLETE QUERY TYPES

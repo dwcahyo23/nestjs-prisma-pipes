@@ -34,35 +34,83 @@ function parseAggregateFunction(value: string): {
 }
 
 /**
- * Parse chart configuration
- * @example "bar(createdAt, month)" -> { type: 'bar', dateField: 'createdAt', interval: 'month' }
+ * Parse groupBy configuration
+ * @example "groupBy(category)" -> ['category']
+ * @example "groupBy(category, region)" -> ['category', 'region']
+ * @example "groupBy(marketingMasterCategory.category)" -> ['marketingMasterCategory.category']
+ */
+function parseGroupBy(value: string): string[] | null {
+	if (!value || typeof value !== 'string') return null;
+
+	const match = /^groupBy\(([^)]+)\)$/i.exec(value.trim());
+	if (!match) return null;
+
+	const [, fields] = match;
+	return fields.split(',').map(f => f.trim()).filter(Boolean);
+}
+
+/**
+ * Parse chart configuration with advanced options
+ * @example "bar" -> { type: 'bar' }
+ * @example "bar(category)" -> { type: 'bar', groupField: 'category' }
+ * @example "bar(marketingMasterCategory.category)" -> { type: 'bar', groupField: 'marketingMasterCategory.category' }
+ * @example "line(createdAt, month)" -> { type: 'line', dateField: 'createdAt', interval: 'month' }
+ * @example "pie(category, stacked)" -> { type: 'pie', groupField: 'category', stacked: true }
+ * @example "bar(category, horizontal)" -> { type: 'bar', groupField: 'category', horizontal: true }
  */
 function parseChartConfig(value: string): {
 	type: Pipes.ChartType;
+	groupField?: string;
 	dateField?: string;
 	interval?: Pipes.TimeInterval;
+	stacked?: boolean;
+	horizontal?: boolean;
 } | null {
 	if (!value || typeof value !== 'string') return null;
 
-	const chartTypes: Pipes.ChartType[] = ['bar', 'line', 'pie'];
+	const chartTypes: Pipes.ChartType[] = ['bar', 'line', 'pie', 'area', 'donut'];
 
-	// Simple chart type without time series
+	// Simple chart type without parameters
 	if (chartTypes.includes(value.toLowerCase() as Pipes.ChartType)) {
 		return { type: value.toLowerCase() as Pipes.ChartType };
 	}
 
-	// Chart with time series: bar(createdAt, month)
-	const match = /^(bar|line|pie)\(([^,]+)(?:,\s*(day|month|year))?\)$/i.exec(value.trim());
+	// Chart with parameters: bar(field) or bar(field, option)
+	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^)]+))?\)$/i.exec(value.trim());
 
 	if (!match) return null;
 
-	const [, type, dateField, interval] = match;
+	const [, type, firstParam, secondParam] = match;
+	const chartType = type.toLowerCase() as Pipes.ChartType;
 
-	return {
-		type: type.toLowerCase() as Pipes.ChartType,
-		dateField: dateField.trim(),
-		interval: (interval?.toLowerCase() as Pipes.TimeInterval) || 'month',
-	};
+	// Check if first parameter is a time interval (time series chart)
+	const timeIntervals = ['day', 'month', 'year'];
+	if (timeIntervals.includes(secondParam?.toLowerCase())) {
+		return {
+			type: chartType,
+			dateField: firstParam.trim(),
+			interval: secondParam.toLowerCase() as Pipes.TimeInterval,
+		};
+	}
+
+	// Check for chart options (stacked, horizontal, etc.)
+	const options: any = { type: chartType, groupField: firstParam.trim() };
+
+	if (secondParam) {
+		const option = secondParam.toLowerCase().trim();
+		if (option === 'stacked') {
+			options.stacked = true;
+		} else if (option === 'horizontal') {
+			options.horizontal = true;
+		} else if (timeIntervals.includes(option)) {
+			// If second param is interval, first param is dateField
+			options.dateField = firstParam.trim();
+			options.interval = option as Pipes.TimeInterval;
+			delete options.groupField;
+		}
+	}
+
+	return options;
 }
 
 /**
@@ -124,6 +172,21 @@ function getTimeKey(date: Date | string, interval: Pipes.TimeInterval): string {
 }
 
 /**
+ * Get nested property value
+ */
+function getNestedValue(obj: any, path: string): any {
+	const keys = path.split('.');
+	let value = obj;
+
+	for (const key of keys) {
+		if (value == null) return null;
+		value = value[key];
+	}
+
+	return value;
+}
+
+/**
  * Build Prisma aggregate object
  */
 function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string, any> {
@@ -155,7 +218,7 @@ function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string,
 function transformToChartSeries(
 	data: any[],
 	aggregates: Pipes.AggregateSpec[],
-	chartConfig?: { type: Pipes.ChartType; dateField?: string; interval?: Pipes.TimeInterval },
+	chartConfig?: Pipes.ChartConfig,
 	groupBy?: string[],
 ): Pipes.ChartSeries {
 	const dataArray = Array.isArray(data) ? data : [];
@@ -171,16 +234,22 @@ function transformToChartSeries(
 			categories: ['Total'],
 			series,
 			chartType: chartConfig?.type,
+			stacked: chartConfig?.stacked,
+			horizontal: chartConfig?.horizontal,
 			raw: [],
 		};
 	}
 
-	// Time series chart
+	// Time series chart with optional grouping
 	if (chartConfig?.dateField && chartConfig?.interval) {
+		// Check if there's a non-date groupBy field (for grouped time series)
+		const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
+		const hasGrouping = nonDateGroupFields.length > 0;
+
 		let year: number | undefined;
 		try {
 			const dates = dataArray
-				.map(item => item[chartConfig.dateField!])
+				.map(item => getNestedValue(item, chartConfig.dateField!))
 				.filter(Boolean)
 				.map((d: any) => new Date(d));
 			if (dates.length > 0) {
@@ -192,10 +261,77 @@ function transformToChartSeries(
 		}
 
 		const timeLabels = generateTimeSeriesLabels(chartConfig.interval, year);
+
+		// Grouped time series: separate series per group (e.g., per category)
+		if (hasGrouping) {
+			const groupField = chartConfig.groupField || nonDateGroupFields[0];
+
+			// Create a map: groupValue -> timeKey -> data items
+			const groupedDataMap = new Map<string, Map<string, any[]>>();
+
+			dataArray.forEach(item => {
+				const dateValue = getNestedValue(item, chartConfig.dateField!);
+				const groupValue = String(getNestedValue(item, groupField) ?? 'null');
+
+				if (dateValue) {
+					const timeKey = getTimeKey(new Date(dateValue), chartConfig.interval!);
+
+					if (!groupedDataMap.has(groupValue)) {
+						groupedDataMap.set(groupValue, new Map());
+					}
+
+					const timeMap = groupedDataMap.get(groupValue)!;
+					if (!timeMap.has(timeKey)) {
+						timeMap.set(timeKey, []);
+					}
+					timeMap.get(timeKey)!.push(item);
+				}
+			});
+
+			// Create series: one per aggregate per group
+			const series: Array<{ name: string; data: number[] }> = [];
+
+			groupedDataMap.forEach((timeMap, groupValue) => {
+				aggregates.forEach((agg: Pipes.AggregateSpec) => {
+					const { function: func, field } = agg;
+					const seriesName = `${groupValue} - ${func}(${field})`;
+
+					const seriesData = timeLabels.map(label => {
+						const items = timeMap.get(label);
+						if (!items || items.length === 0) return 0;
+
+						if (func === 'count') {
+							return items.reduce((acc, it) => {
+								const val = typeof it._count === 'number' ? it._count : (it._count?.[field] || it._count || 0);
+								return acc + (typeof val === 'number' ? val : 0);
+							}, 0);
+						}
+
+						return items.reduce((acc, it) => {
+							const val = it[`_${func}`]?.[field] || 0;
+							return acc + (typeof val === 'number' ? val : 0);
+						}, 0);
+					});
+
+					series.push({ name: seriesName, data: seriesData });
+				});
+			});
+
+			return {
+				categories: timeLabels,
+				series,
+				chartType: chartConfig.type,
+				stacked: chartConfig.stacked,
+				horizontal: chartConfig.horizontal,
+				raw: dataArray,
+			};
+		}
+
+		// Regular time series (no grouping)
 		const dataMap = new Map<string, any[]>();
 
 		dataArray.forEach(item => {
-			const dateValue = item[chartConfig.dateField!];
+			const dateValue = getNestedValue(item, chartConfig.dateField!);
 			if (dateValue) {
 				const key = getTimeKey(new Date(dateValue), chartConfig.interval!);
 				if (!dataMap.has(key)) {
@@ -233,19 +369,23 @@ function transformToChartSeries(
 			categories: timeLabels,
 			series,
 			chartType: chartConfig.type,
+			stacked: chartConfig.stacked,
+			horizontal: chartConfig.horizontal,
 			raw: dataArray,
 		};
 	}
 
 	// Grouped (non-time-series) chart
 	if (groupBy && groupBy.length > 0) {
-		const groupField = groupBy[0];
+		// Determine which field to use for categories
+		const categoryField = chartConfig?.groupField || groupBy[0];
+
 		const categories = dataArray.map(item => {
-			const val = item[groupField];
+			const val = getNestedValue(item, categoryField);
 			if (val instanceof Date) {
 				return getTimeKey(val, 'day');
 			}
-			return String(val);
+			return String(val ?? 'null');
 		});
 
 		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
@@ -266,6 +406,8 @@ function transformToChartSeries(
 			categories,
 			series,
 			chartType: chartConfig?.type,
+			stacked: chartConfig?.stacked,
+			horizontal: chartConfig?.horizontal,
 			raw: dataArray,
 		};
 	}
@@ -291,25 +433,90 @@ function transformToChartSeries(
 		categories,
 		series,
 		chartType: chartConfig?.type,
+		stacked: chartConfig?.stacked,
+		horizontal: chartConfig?.horizontal,
 		raw: dataArray,
 	};
 }
 
 /**
- * @description Parse aggregate query string
+ * @description Parse aggregate query string with flexible grouping and advanced chart options
  *
- * Format: aggregate=field1: function(params), field2: function(), chart: type(dateField, interval)
+ * Format: aggregate=field1: sum(), field2: count(), groupBy(field), chart: type(options)
  *
  * Examples:
- * - aggregate=revenue: sum(), orders: count()
- * - aggregate=price: avg(), quantity: sum(), chart: bar(createdAt, month)
- * - aggregate=total: sum(), chart: line(orderDate, month)
- * - aggregate=amount: sum(), status: count(id), chart: pie
+ * 
+ * 1. Basic aggregation (no grouping):
+ *    aggregate=qty: sum(), recQty: sum()
  *
- * Can be combined with other pipes:
- * ?where=status: string(active), createdAt: gte date(2024-01-01)&aggregate=revenue: sum(), chart: line(createdAt, month)
+ * 2. Grouped aggregation (sum per category):
+ *    aggregate=qty: sum(), recQty: sum(), groupBy(marketingMasterCategory.category)
  *
- * @returns Prisma aggregate config and chart transformation info
+ * 3. Grouped with simple bar chart:
+ *    aggregate=qty: sum(), recQty: sum(), groupBy(marketingMasterCategory.category), chart: bar
+ *
+ * 4. Chart dengan groupField eksplisit:
+ *    aggregate=qty: sum(), recQty: sum(), groupBy(category, region), chart: bar(category)
+ *    (akan group by category & region, tapi chart categories menggunakan category)
+ *
+ * 5. Horizontal bar chart:
+ *    aggregate=qty: sum(), groupBy(marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
+ *
+ * 6. Stacked bar chart (multiple series stacked):
+ *    aggregate=qty: sum(), recQty: sum(), groupBy(category), chart: bar(category, stacked)
+ *
+ * 7. Pie chart per category:
+ *    aggregate=revenue: sum(), groupBy(marketingMasterCategory.category), chart: pie(marketingMasterCategory.category)
+ *
+ * 8. Donut chart:
+ *    aggregate=qty: sum(), groupBy(category), chart: donut(category)
+ *
+ * 9. Area chart:
+ *    aggregate=revenue: sum(), groupBy(category), chart: area(category)
+ *
+ * 10. Time series line chart:
+ *     aggregate=revenue: sum(), chart: line(createdAt, month)
+ *
+ * 11. Stacked area chart dengan time series:
+ *     aggregate=qty: sum(), recQty: sum(), chart: area(createdAt, month)
+ *
+ * 12. GROUPED TIME SERIES - trend per category over time:
+ *     aggregate=qty: sum(), groupBy(marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
+ *     Result: Separate line for each category showing trend over months
+ *
+ * 13. Stacked time series per category:
+ *     aggregate=revenue: sum(), groupBy(category, createdAt), chart: area(createdAt, month, stacked)
+ *     Result: Stacked area showing each category's contribution over time
+ *
+ * 14. Multiple categories trend comparison:
+ *     aggregate=qty: sum(), recQty: sum(), groupBy(category, createdAt), chart: line(createdAt, month)
+ *     Result: Multiple lines per category (category1-qty, category1-recQty, category2-qty, etc.)
+ *
+ * Combined with where filter:
+ * ?where=marketingMasterCategory.category: in array(COM,O4W,O2W,OES,EXX)
+ * &aggregate=qty: sum(), recQty: sum(), groupBy(marketingMasterCategory.category), chart: bar(marketingMasterCategory.category)
+ *
+ * This will return:
+ * - Sum of qty and recQty for EACH category (COM, O4W, O2W, OES, EXX)
+ * - Chart with categories: ["COM", "O4W", "O2W", "OES", "EXX"]
+ * - Series: [{ name: "sum(qty)", data: [...] }, { name: "sum(recQty)", data: [...] }]
+ *
+ * GROUPED TIME SERIES example:
+ * ?where=marketingMasterCategory.category: in array(COM,O4W,O2W,OES,EXX)
+ * &aggregate=qty: sum(), groupBy(marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
+ *
+ * This will return:
+ * - Time series with monthly labels: ["Jan 2024", "Feb 2024", ...]
+ * - Separate line for EACH category: 
+ *   [
+ *     { name: "COM - sum(qty)", data: [10, 20, 15, ...] },
+ *     { name: "O4W - sum(qty)", data: [30, 25, 40, ...] },
+ *     { name: "O2W - sum(qty)", data: [15, 18, 22, ...] },
+ *     ...
+ *   ]
+ * - Perfect for comparing trends across categories!
+ *
+ * @returns Prisma aggregate config with groupBy and chart visualization support
  */
 @Injectable()
 export default class AggregatePipe implements PipeTransform {
@@ -324,9 +531,11 @@ export default class AggregatePipe implements PipeTransform {
 			}
 
 			const aggregates: Pipes.AggregateSpec[] = [];
-			let chartConfig: { type: Pipes.ChartType; dateField?: string; interval?: Pipes.TimeInterval } | undefined;
+			let chartConfig: Pipes.ChartConfig | undefined;
+			let groupByFields: string[] = [];
 
 			for (const [key, val] of parsed) {
+				// Handle chart configuration
 				if (key === 'chart' && val) {
 					const config = parseChartConfig(val);
 					if (config) {
@@ -335,6 +544,16 @@ export default class AggregatePipe implements PipeTransform {
 					}
 				}
 
+				// Handle groupBy configuration
+				if (key === 'groupBy' && val) {
+					const fields = parseGroupBy(val);
+					if (fields && fields.length > 0) {
+						groupByFields = fields;
+						continue;
+					}
+				}
+
+				// Handle aggregate functions
 				if (val) {
 					const aggFunc = parseAggregateFunction(val);
 					if (aggFunc) {
@@ -352,23 +571,32 @@ export default class AggregatePipe implements PipeTransform {
 			}
 
 			const prismaQuery = buildPrismaAggregate(aggregates);
-			const groupBy = chartConfig?.dateField ? [chartConfig.dateField] : [];
-			const isGrouped = groupBy.length > 0;
+
+			// Determine groupBy priority:
+			// 1. Explicit groupBy() takes precedence
+			// 2. Chart's groupField if specified
+			// 3. Chart's dateField for time series
+			let finalGroupBy: string[] = [];
+			if (groupByFields.length > 0) {
+				finalGroupBy = groupByFields;
+			} else if (chartConfig?.groupField) {
+				finalGroupBy = [chartConfig.groupField];
+			} else if (chartConfig?.dateField) {
+				finalGroupBy = [chartConfig.dateField];
+			}
+
+			const isGrouped = finalGroupBy.length > 0;
 
 			if (isGrouped) {
 				return {
 					prismaQuery: {
-						by: groupBy,
+						by: finalGroupBy,
 						...prismaQuery,
 					},
 					aggregates,
-					groupBy,
+					groupBy: finalGroupBy,
 					isGrouped: true,
-					chartType: chartConfig?.type,
-					timeSeries: chartConfig?.dateField ? {
-						dateField: chartConfig.dateField,
-						interval: chartConfig.interval || 'month',
-					} : undefined,
+					chartConfig,
 				};
 			}
 
@@ -377,7 +605,7 @@ export default class AggregatePipe implements PipeTransform {
 				aggregates,
 				groupBy: [],
 				isGrouped: false,
-				chartType: chartConfig?.type,
+				chartConfig,
 			};
 		} catch (error) {
 			if (error instanceof BadRequestException) throw error;
@@ -391,23 +619,13 @@ export default class AggregatePipe implements PipeTransform {
 	 *
 	 * @example
 	 * const config = aggregatePipe.transform(query.aggregate);
-	 * const data = await prisma.model.aggregate(config.prismaQuery);
+	 * const data = await prisma.model.groupBy(config.prismaQuery);
 	 * const chartData = AggregatePipe.toChartSeries(data, config);
 	 */
 	static toChartSeries(
 		data: any[] | any,
 		aggregateConfig: Pipes.Aggregate,
 	): Pipes.ChartSeries {
-		const chartConfig = aggregateConfig.timeSeries
-			? {
-				type: (aggregateConfig.chartType || 'bar') as Pipes.ChartType,
-				dateField: aggregateConfig.timeSeries.dateField,
-				interval: aggregateConfig.timeSeries.interval,
-			}
-			: aggregateConfig.chartType
-				? { type: aggregateConfig.chartType }
-				: undefined;
-
 		// Handle non-grouped aggregate
 		if (!aggregateConfig.isGrouped) {
 			if (!data || (Array.isArray(data) && data.length === 0)) {
@@ -419,7 +637,9 @@ export default class AggregatePipe implements PipeTransform {
 				return {
 					categories: ['Total'],
 					series,
-					chartType: chartConfig?.type,
+					chartType: aggregateConfig.chartConfig?.type,
+					stacked: aggregateConfig.chartConfig?.stacked,
+					horizontal: aggregateConfig.chartConfig?.horizontal,
 					raw: [],
 				};
 			}
@@ -445,13 +665,20 @@ export default class AggregatePipe implements PipeTransform {
 			return {
 				categories: ['Total'],
 				series,
-				chartType: chartConfig?.type,
+				chartType: aggregateConfig.chartConfig?.type,
+				stacked: aggregateConfig.chartConfig?.stacked,
+				horizontal: aggregateConfig.chartConfig?.horizontal,
 				raw: Array.isArray(data) ? data : [data],
 			};
 		}
 
 		// Handle grouped aggregate
 		const dataArray = Array.isArray(data) ? data : [data];
-		return transformToChartSeries(dataArray, aggregateConfig.aggregates, chartConfig, aggregateConfig.groupBy);
+		return transformToChartSeries(
+			dataArray,
+			aggregateConfig.aggregates,
+			aggregateConfig.chartConfig,
+			aggregateConfig.groupBy
+		);
 	}
 }
