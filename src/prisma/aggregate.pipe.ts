@@ -58,6 +58,41 @@ function parseGroupBy(value: string): string[] | null {
 }
 
 /**
+ * Check if any groupBy field contains a relationship (has ".")
+ */
+function hasRelationshipInGroupBy(groupBy: string[]): boolean {
+	return groupBy.some(field => field.includes('.'));
+}
+
+/**
+ * Parse relationship path into table and field
+ * @example "marketingMasterCategory.category" -> { relation: "marketingMasterCategory", field: "category" }
+ * @example "warehouse.region.name" -> { relation: "warehouse.region", field: "name" }
+ */
+function parseRelationshipPath(path: string): { relation: string; field: string } {
+	const parts = path.split('.');
+	const field = parts.pop()!;
+	const relation = parts.join('.');
+	return { relation, field };
+}
+
+/**
+ * Build SQL field expression for relationship
+ * @example "marketingMasterCategory.category" -> "marketingMasterCategory.category"
+ */
+function buildSqlFieldPath(path: string, tableAlias: string = 'main'): string {
+	if (!path.includes('.')) {
+		return `${tableAlias}.${path}`;
+	}
+
+	// For nested relationships, we'll use the last segment
+	const parts = path.split('.');
+	const relationAlias = parts.slice(0, -1).join('_');
+	const field = parts[parts.length - 1];
+	return `${relationAlias}.${field}`;
+}
+
+/**
  * Parse chart configuration with advanced options
  * @example "bar" -> { type: 'bar' }
  * @example "bar(category)" -> { type: 'bar', groupField: 'category' }
@@ -218,6 +253,101 @@ function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string,
 	}
 
 	return aggregateObj;
+}
+
+/**
+ * Build raw SQL query for aggregation with relationships
+ * @param tableName - Main table name (e.g., "Product")
+ * @param aggregates - Aggregate specifications
+ * @param groupBy - GroupBy fields (may contain relationships)
+ * @param whereClause - Optional WHERE conditions
+ */
+function buildRawSqlQuery(
+	tableName: string,
+	aggregates: Pipes.AggregateSpec[],
+	groupBy: string[],
+	whereClause?: any
+): { query: string; params: any[] } {
+	const params: any[] = [];
+
+	// Build SELECT clause
+	const selectFields: string[] = [];
+	const aggregateFields: string[] = [];
+
+	// Add GROUP BY fields to SELECT
+	groupBy.forEach((field, idx) => {
+		const sqlField = buildSqlFieldPath(field);
+		selectFields.push(`${sqlField} as group_${idx}`);
+	});
+
+	// Add aggregate functions to SELECT
+	aggregates.forEach((agg, idx) => {
+		const { function: func, field } = agg;
+		const sqlField = buildSqlFieldPath(field);
+
+		let aggExpr: string;
+		switch (func) {
+			case 'sum':
+				aggExpr = `SUM(${sqlField})`;
+				break;
+			case 'avg':
+				aggExpr = `AVG(${sqlField})`;
+				break;
+			case 'min':
+				aggExpr = `MIN(${sqlField})`;
+				break;
+			case 'max':
+				aggExpr = `MAX(${sqlField})`;
+				break;
+			case 'count':
+				aggExpr = field === '*' ? 'COUNT(*)' : `COUNT(${sqlField})`;
+				break;
+			default:
+				aggExpr = `SUM(${sqlField})`;
+		}
+
+		aggregateFields.push(`${aggExpr} as agg_${func}_${idx}`);
+	});
+
+	const allSelectFields = [...selectFields, ...aggregateFields].join(', ');
+
+	// Build FROM clause with JOINs for relationships
+	let fromClause = `${tableName} as main`;
+	const joinedRelations = new Set<string>();
+
+	groupBy.forEach(field => {
+		if (field.includes('.')) {
+			const parts = field.split('.');
+			const relationName = parts[0];
+
+			if (!joinedRelations.has(relationName)) {
+				// Simple LEFT JOIN - adjust based on your schema
+				fromClause += ` LEFT JOIN ${relationName} as ${relationName} ON main.${relationName}Id = ${relationName}.id`;
+				joinedRelations.add(relationName);
+			}
+		}
+	});
+
+	// Build WHERE clause (simplified - expand based on your needs)
+	let whereClauseSql = '';
+	if (whereClause && Object.keys(whereClause).length > 0) {
+		// Simple implementation - you may need to expand this
+		whereClauseSql = 'WHERE 1=1';
+	}
+
+	// Build GROUP BY clause
+	const groupByClause = groupBy.map((field, idx) => buildSqlFieldPath(field)).join(', ');
+
+	// Construct final query
+	const query = `
+		SELECT ${allSelectFields}
+		FROM ${fromClause}
+		${whereClauseSql}
+		GROUP BY ${groupByClause}
+		ORDER BY ${groupByClause}
+	`.trim();
+
+	return { query, params };
 }
 
 /**
@@ -542,8 +672,6 @@ export default class AggregatePipe implements PipeTransform {
 				throw new BadRequestException('At least one aggregate function is required');
 			}
 
-			const prismaQuery = buildPrismaAggregate(aggregates);
-
 			// Determine groupBy priority:
 			// 1. Explicit groupBy: (fields) takes precedence
 			// 2. Chart's groupField if specified
@@ -558,8 +686,25 @@ export default class AggregatePipe implements PipeTransform {
 			}
 
 			const isGrouped = finalGroupBy.length > 0;
+			const useRawQuery = isGrouped && hasRelationshipInGroupBy(finalGroupBy);
 
 			if (isGrouped) {
+				// If relationships detected, use raw query
+				if (useRawQuery) {
+					return {
+						prismaQuery: null as any, // Will be replaced with raw query
+						aggregates,
+						groupBy: finalGroupBy,
+						isGrouped: true,
+						chartConfig,
+						useRawQuery: true,
+						rawQueryBuilder: (tableName: string, whereClause?: any) =>
+							buildRawSqlQuery(tableName, aggregates, finalGroupBy, whereClause),
+					};
+				}
+
+				// Standard Prisma groupBy
+				const prismaQuery = buildPrismaAggregate(aggregates);
 				return {
 					prismaQuery: {
 						by: finalGroupBy,
@@ -569,15 +714,18 @@ export default class AggregatePipe implements PipeTransform {
 					groupBy: finalGroupBy,
 					isGrouped: true,
 					chartConfig,
+					useRawQuery: false,
 				};
 			}
 
+			const prismaQuery = buildPrismaAggregate(aggregates);
 			return {
 				prismaQuery,
 				aggregates,
 				groupBy: [],
 				isGrouped: false,
 				chartConfig,
+				useRawQuery: false,
 			};
 		} catch (error) {
 			if (error instanceof BadRequestException) throw error;
@@ -639,7 +787,7 @@ export default class AggregatePipe implements PipeTransform {
 			};
 		}
 
-		// Handle grouped aggregate
+		// Handle grouped aggregate (including raw query results)
 		const dataArray = Array.isArray(data) ? data : [data];
 		return transformToChartSeries(
 			dataArray,

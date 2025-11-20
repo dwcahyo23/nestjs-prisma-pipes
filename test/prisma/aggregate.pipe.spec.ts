@@ -31,6 +31,7 @@ describe('AggregatePipe', () => {
 			expect(result?.prismaQuery).toEqual({
 				_sum: { revenue: true },
 			});
+			expect(result?.useRawQuery).toBe(false);
 		});
 
 		it('should parse multiple aggregates', () => {
@@ -42,6 +43,7 @@ describe('AggregatePipe', () => {
 				_count: true,
 				_avg: { price: true },
 			});
+			expect(result?.useRawQuery).toBe(false);
 		});
 
 		it('should parse all aggregate functions', () => {
@@ -57,6 +59,7 @@ describe('AggregatePipe', () => {
 				_max: { maximum: true },
 				_count: true,
 			});
+			expect(result?.useRawQuery).toBe(false);
 		});
 	});
 
@@ -70,6 +73,7 @@ describe('AggregatePipe', () => {
 			expect(result?.groupBy).toEqual(['category']);
 			expect(result?.prismaQuery.by).toEqual(['category']);
 			expect(result?.isGrouped).toBe(true);
+			expect(result?.useRawQuery).toBe(false);
 		});
 
 		it('should parse multiple groupBy fields', () => {
@@ -77,28 +81,34 @@ describe('AggregatePipe', () => {
 
 			expect(result?.groupBy).toEqual(['category', 'region']);
 			expect(result?.prismaQuery.by).toEqual(['category', 'region']);
+			expect(result?.useRawQuery).toBe(false);
 		});
 
-		it('should parse nested groupBy fields', () => {
+		it('should parse nested groupBy fields and use raw query', () => {
 			const result = pipe.transform(
 				'qty: sum(), groupBy: (marketingMasterCategory.category)'
 			);
 
 			expect(result?.groupBy).toEqual(['marketingMasterCategory.category']);
+			expect(result?.useRawQuery).toBe(true);
+			expect(result?.rawQueryBuilder).toBeDefined();
 		});
 
-		it('should parse multiple nested paths', () => {
+		it('should parse multiple nested paths and use raw query', () => {
 			const result = pipe.transform(
 				'qty: sum(), groupBy: (marketingMasterCategory.category, warehouse.region)'
 			);
 
 			expect(result?.groupBy).toEqual(['marketingMasterCategory.category', 'warehouse.region']);
+			expect(result?.useRawQuery).toBe(true);
+			expect(result?.rawQueryBuilder).toBeDefined();
 		});
 
 		it('should handle groupBy with whitespace', () => {
 			const result = pipe.transform('qty: sum(), groupBy: ( category , region )');
 
 			expect(result?.groupBy).toEqual(['category', 'region']);
+			expect(result?.useRawQuery).toBe(false);
 		});
 	});
 
@@ -121,15 +131,17 @@ describe('AggregatePipe', () => {
 
 			expect(result?.chartConfig?.type).toBe('bar');
 			expect(result?.chartConfig?.groupField).toBe('category');
+			expect(result?.useRawQuery).toBe(false);
 		});
 
-		it('should parse chart with nested path', () => {
+		it('should parse chart with nested path and use raw query', () => {
 			const result = pipe.transform(
 				'qty: sum(), groupBy: (marketingMasterCategory.category), chart: bar(marketingMasterCategory.category)'
 			);
 
 			expect(result?.chartConfig?.type).toBe('bar');
 			expect(result?.chartConfig?.groupField).toBe('marketingMasterCategory.category');
+			expect(result?.useRawQuery).toBe(true);
 		});
 
 		it('should parse chart with options', () => {
@@ -149,6 +161,7 @@ describe('AggregatePipe', () => {
 
 			expect(result?.groupBy).toEqual(['category']);
 			expect(result?.isGrouped).toBe(true);
+			expect(result?.useRawQuery).toBe(false);
 		});
 	});
 
@@ -163,6 +176,7 @@ describe('AggregatePipe', () => {
 			expect(result?.chartConfig?.dateField).toBe('createdAt');
 			expect(result?.chartConfig?.interval).toBe('month');
 			expect(result?.groupBy).toEqual(['createdAt']);
+			expect(result?.useRawQuery).toBe(false);
 		});
 
 		it('should parse all time intervals', () => {
@@ -190,6 +204,7 @@ describe('AggregatePipe', () => {
 			expect(result?.groupBy).toEqual(['category', 'createdAt']);
 			expect(result?.chartConfig?.dateField).toBe('createdAt');
 			expect(result?.chartConfig?.interval).toBe('month');
+			expect(result?.useRawQuery).toBe(false);
 		});
 
 		it('should handle multiple aggregates with grouped time series', () => {
@@ -199,15 +214,65 @@ describe('AggregatePipe', () => {
 
 			expect(result?.aggregates).toHaveLength(2);
 			expect(result?.groupBy).toEqual(['category', 'createdAt']);
+			expect(result?.useRawQuery).toBe(false);
 		});
 
-		it('should parse nested path with time series', () => {
+		it('should parse nested path with time series and use raw query', () => {
 			const result = pipe.transform(
 				'qty: sum(), groupBy: (marketingMasterCategory.category, createdAt), chart: line(createdAt, month)'
 			);
 
 			expect(result?.groupBy).toEqual(['marketingMasterCategory.category', 'createdAt']);
 			expect(result?.chartConfig?.dateField).toBe('createdAt');
+			expect(result?.useRawQuery).toBe(true);
+		});
+	});
+
+	// ============================================================================
+	// RAW QUERY GENERATION
+	// ============================================================================
+	describe('Raw Query Generation', () => {
+		it('should generate raw query for nested relationship', () => {
+			const result = pipe.transform(
+				'qty: sum(), groupBy: (marketingMasterCategory.category)'
+			);
+
+			expect(result?.useRawQuery).toBe(true);
+			expect(result?.rawQueryBuilder).toBeDefined();
+
+			if (result?.rawQueryBuilder) {
+				const { query } = result.rawQueryBuilder('Product');
+				expect(query).toContain('SELECT');
+				expect(query).toContain('GROUP BY');
+				expect(query).toContain('marketingMasterCategory.category');
+				expect(query).toContain('SUM(main.qty)');
+			}
+		});
+
+		it('should generate raw query with multiple aggregates', () => {
+			const result = pipe.transform(
+				'qty: sum(), recQty: avg(), groupBy: (marketingMasterCategory.category)'
+			);
+
+			if (result?.rawQueryBuilder) {
+				const { query } = result.rawQueryBuilder('Product');
+				expect(query).toContain('SUM(main.qty)');
+				expect(query).toContain('AVG(main.recQty)');
+			}
+		});
+
+		it('should generate raw query with multiple relationships', () => {
+			const result = pipe.transform(
+				'qty: sum(), groupBy: (marketingMasterCategory.category, warehouse.region)'
+			);
+
+			if (result?.rawQueryBuilder) {
+				const { query } = result.rawQueryBuilder('Product');
+				expect(query).toContain('marketingMasterCategory.category');
+				expect(query).toContain('warehouse.region');
+				expect(query).toContain('LEFT JOIN marketingMasterCategory');
+				expect(query).toContain('LEFT JOIN warehouse');
+			}
 		});
 	});
 
@@ -504,6 +569,7 @@ describe('AggregatePipe', () => {
 				_sum: { qty: true },
 				_avg: { price: true },
 			});
+			expect(config?.useRawQuery).toBe(false);
 		});
 
 		it('should generate correct query for groupBy', () => {
@@ -513,6 +579,7 @@ describe('AggregatePipe', () => {
 				by: ['category'],
 				_sum: { qty: true },
 			});
+			expect(config?.useRawQuery).toBe(false);
 		});
 
 		it('should generate correct query for multiple groupBy', () => {
@@ -524,6 +591,7 @@ describe('AggregatePipe', () => {
 				by: ['category', 'region'],
 				_sum: { qty: true },
 			});
+			expect(config?.useRawQuery).toBe(false);
 		});
 
 		it('should generate correct query for time series', () => {
@@ -535,6 +603,7 @@ describe('AggregatePipe', () => {
 				by: ['createdAt'],
 				_sum: { revenue: true },
 			});
+			expect(config?.useRawQuery).toBe(false);
 		});
 
 		it('should generate correct query for grouped time series', () => {
@@ -546,17 +615,37 @@ describe('AggregatePipe', () => {
 				by: ['category', 'createdAt'],
 				_sum: { qty: true },
 			});
+			expect(config?.useRawQuery).toBe(false);
 		});
 
-		it('should generate correct query for nested paths', () => {
+		it('should use raw query for nested paths', () => {
 			const config = pipe.transform(
 				'qty: sum(), groupBy: (marketingMasterCategory.category, warehouse.region)'
 			);
 
-			expect(config?.prismaQuery).toEqual({
-				by: ['marketingMasterCategory.category', 'warehouse.region'],
-				_sum: { qty: true },
-			});
+			expect(config?.useRawQuery).toBe(true);
+			expect(config?.groupBy).toEqual(['marketingMasterCategory.category', 'warehouse.region']);
+			expect(config?.aggregates).toHaveLength(1);
+			expect(config?.rawQueryBuilder).toBeDefined();
+
+			// Test raw query builder
+			if (config?.rawQueryBuilder) {
+				const { query } = config.rawQueryBuilder('Product');
+				expect(query).toContain('SELECT');
+				expect(query).toContain('GROUP BY');
+				expect(query).toContain('marketingMasterCategory.category');
+				expect(query).toContain('warehouse.region');
+			}
+		});
+
+		it('should use raw query for single nested path', () => {
+			const config = pipe.transform(
+				'qty: sum(), groupBy: (marketingMasterCategory.category)'
+			);
+
+			expect(config?.useRawQuery).toBe(true);
+			expect(config?.groupBy).toEqual(['marketingMasterCategory.category']);
+			expect(config?.rawQueryBuilder).toBeDefined();
 		});
 	});
 
@@ -564,7 +653,7 @@ describe('AggregatePipe', () => {
 	// REAL-WORLD SCENARIOS
 	// ============================================================================
 	describe('Real-World Scenarios', () => {
-		it('should handle complex dashboard query', () => {
+		it('should handle complex dashboard query with raw query', () => {
 			const query = 'qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)';
 			const result = pipe.transform(query);
 
@@ -572,10 +661,20 @@ describe('AggregatePipe', () => {
 			expect(result?.groupBy).toEqual(['marketingMasterCategory.category']);
 			expect(result?.chartConfig?.type).toBe('bar');
 			expect(result?.chartConfig?.horizontal).toBe(true);
-			expect(result?.prismaQuery.by).toEqual(['marketingMasterCategory.category']);
+
+			// Should use raw query because of nested path
+			expect(result?.useRawQuery).toBe(true);
+			expect(result?.rawQueryBuilder).toBeDefined();
+
+			// Test query generation
+			if (result?.rawQueryBuilder) {
+				const { query } = result.rawQueryBuilder('Product');
+				expect(query).toContain('SUM(main.qty)');
+				expect(query).toContain('SUM(main.recQty)');
+			}
 		});
 
-		it('should handle trend analysis query', () => {
+		it('should handle trend analysis query without relationships', () => {
 			const query = 'revenue: sum(), orderCount: count(), groupBy: (category, createdAt), chart: line(createdAt, month)';
 			const result = pipe.transform(query);
 
@@ -583,6 +682,8 @@ describe('AggregatePipe', () => {
 			expect(result?.groupBy).toEqual(['category', 'createdAt']);
 			expect(result?.chartConfig?.dateField).toBe('createdAt');
 			expect(result?.chartConfig?.interval).toBe('month');
+			expect(result?.useRawQuery).toBe(false);
+			expect(result?.prismaQuery.by).toEqual(['category', 'createdAt']);
 		});
 
 		it('should handle simple metrics without grouping', () => {
@@ -592,6 +693,7 @@ describe('AggregatePipe', () => {
 			expect(result?.aggregates).toHaveLength(5);
 			expect(result?.isGrouped).toBe(false);
 			expect(result?.groupBy).toEqual([]);
+			expect(result?.useRawQuery).toBe(false);
 		});
 	});
 });
