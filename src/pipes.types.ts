@@ -184,7 +184,7 @@ export namespace Pipes {
 		isGrouped: boolean;
 		chartConfig?: ChartConfig;
 		useRawQuery?: boolean;
-		rawQueryBuilder?: RawQueryBuilder;
+		rawQueryBuilder?: (tableName: string, whereClause?: any) => { query: string; params: any[] };
 
 		// Deprecated fields (kept for backward compatibility)
 		chartType?: ChartType;
