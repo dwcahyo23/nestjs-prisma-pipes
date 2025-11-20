@@ -8,7 +8,7 @@ No more manual parsing — just pass query params, and you're good to go 🚀
 
 ## 📜 Changelog
 
-### [2.4.3] - 2025 🔥 NEW
+### [2.4.4] - 2025 🔥 NEW
 
 #### 🚀 Added - Raw Query Support for Nested Relationships
 
