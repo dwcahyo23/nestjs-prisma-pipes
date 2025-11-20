@@ -159,6 +159,14 @@ export namespace Pipes {
 		interval: TimeInterval;
 	}
 
+	export type RawQueryBuilder = (
+		tableName: string,
+		whereClause?: Where
+	) => {
+		query: string;
+		params: any[];
+	};
+
 	/**
 	 * Aggregate configuration returned by pipe
 	 */
@@ -176,7 +184,7 @@ export namespace Pipes {
 		isGrouped: boolean;
 		chartConfig?: ChartConfig;
 		useRawQuery?: boolean;
-		rawQueryBuilder?: (tableName: string, whereClause?: any) => { query: string; params: any[] };
+		rawQueryBuilder?: RawQueryBuilder;
 
 		// Deprecated fields (kept for backward compatibility)
 		chartType?: ChartType;
