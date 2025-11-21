@@ -4,6 +4,8 @@ export declare namespace IncludePipe {
 }
 export declare class IncludePipe implements PipeTransform {
     transform(value?: string): IncludePipe.Include | undefined;
+    private parseIncludePart;
+    private parseFields;
     private assignNestedInclude;
     private splitTopLevel;
 }

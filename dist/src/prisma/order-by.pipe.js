@@ -9,25 +9,41 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const common_1 = require("@nestjs/common");
 let OrderByPipe = class OrderByPipe {
     transform(value) {
-        if (value == null || value.trim() === '')
+        if (!value || value.trim() === '')
             return undefined;
         try {
-            const rules = value.split(',').map((val) => val.trim()).filter(Boolean);
-            const orderBy = {};
-            rules.forEach((rule) => {
+            const rules = value
+                .split(',')
+                .map((val) => val.trim())
+                .filter(Boolean);
+            const orderBy = [];
+            for (const rule of rules) {
                 const [key, order] = rule.split(':').map((s) => s?.trim());
                 if (!key || !order) {
                     throw new common_1.BadRequestException(`Invalid orderBy rule: "${rule}", must be "field:asc|desc"`);
                 }
-                const orderLowerCase = order.toLowerCase();
-                if (!['asc', 'desc'].includes(orderLowerCase)) {
-                    throw new common_1.BadRequestException(`Invalid order: ${orderLowerCase}`);
+                const orderLower = order.toLowerCase();
+                if (!['asc', 'desc'].includes(orderLower)) {
+                    throw new common_1.BadRequestException(`Invalid order direction: ${orderLower}`);
                 }
-                orderBy[key] = orderLowerCase;
-            });
+                const keys = key.split('.');
+                let nested = {};
+                let current = nested;
+                for (let i = 0; i < keys.length; i++) {
+                    const k = keys[i];
+                    if (i === keys.length - 1) {
+                        current[k] = orderLower;
+                    }
+                    else {
+                        current[k] = {};
+                        current = current[k];
+                    }
+                }
+                orderBy.push(nested);
+            }
             return orderBy;
         }
-        catch (error) {
+        catch {
             throw new common_1.BadRequestException('Invalid orderBy query parameter');
         }
     }

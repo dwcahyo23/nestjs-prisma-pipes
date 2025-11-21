@@ -18,30 +18,39 @@ let IncludePipe = class IncludePipe {
         const parts = this.splitTopLevel(strValue, ',');
         const include = {};
         for (const part of parts) {
-            const selectMatch = part.match(/^(.*?)\.select:\((.*?)\)$/);
-            let pathPart;
-            let fields = null;
-            if (selectMatch) {
-                pathPart = selectMatch[1];
-                fields = selectMatch[2].split(',').filter(Boolean);
-            }
-            else {
-                pathPart = part;
-            }
-            const pathKeys = pathPart.split('.').filter(Boolean);
-            if (fields && fields.length > 0) {
-                this.assignNestedInclude(include, pathKeys, {
-                    select: fields.reduce((acc, field) => {
-                        acc[field] = true;
-                        return acc;
-                    }, {}),
-                });
-            }
-            else {
-                this.assignNestedInclude(include, pathKeys, true);
-            }
+            this.parseIncludePart(include, part);
         }
         return include;
+    }
+    parseIncludePart(obj, part) {
+        const selectMatch = part.match(/^(.*?)\.select:\((.*)\)$/);
+        if (selectMatch) {
+            const pathPart = selectMatch[1];
+            const fieldsStr = selectMatch[2];
+            const pathKeys = pathPart.split('.').filter(Boolean);
+            const fields = this.parseFields(fieldsStr);
+            this.assignNestedInclude(obj, pathKeys, { select: fields });
+        }
+        else {
+            const pathKeys = part.split('.').filter(Boolean);
+            this.assignNestedInclude(obj, pathKeys, true);
+        }
+    }
+    parseFields(fieldsStr) {
+        const fields = {};
+        const parts = this.splitTopLevel(fieldsStr, ',');
+        for (const part of parts) {
+            const nestedSelectMatch = part.match(/^(.*?)\.select:\((.*)\)$/);
+            if (nestedSelectMatch) {
+                const key = nestedSelectMatch[1];
+                const nestedFields = this.parseFields(nestedSelectMatch[2]);
+                fields[key] = { select: nestedFields };
+            }
+            else {
+                fields[part] = true;
+            }
+        }
+        return fields;
     }
     assignNestedInclude(obj, keys, value) {
         const [first, ...rest] = keys;

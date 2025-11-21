@@ -9,27 +9,6 @@ const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'] as const;
 type AggregateFunction = typeof AGGREGATE_FUNCTIONS[number];
 
 /**
- * Default mapping provider (identity mapping - no transformation)
- */
-class DefaultMappingProvider implements Pipes.MappingProvider {
-	getTableName(modelName: string): string {
-		return modelName;
-	}
-
-	getColumnName(modelName: string, fieldName: string): string {
-		return fieldName;
-	}
-
-	getPrimaryKey(modelName: string): string[] {
-		return ['id']; // Default assumption
-	}
-
-	getForeignKey(modelName: string, relationName: string): string[] {
-		return [`${relationName}Id`]; // Default convention
-	}
-}
-
-/**
  * Parse aggregate function with parameters
  */
 function parseAggregateFunction(value: string): {
@@ -79,70 +58,13 @@ function hasRelationshipInGroupBy(groupBy: string[]): boolean {
 }
 
 /**
- * Parse relationship path into table and field
+ * Parse relationship path into relation name and field
  */
 function parseRelationshipPath(path: string): { relation: string; field: string } {
 	const parts = path.split('.');
 	const field = parts.pop()!;
 	const relation = parts.join('.');
 	return { relation, field };
-}
-
-/**
- * Map model relationship path to database table path
- * @example "marketingMasterCategory.category" -> "market_master_category.category"
- */
-function mapRelationshipPath(
-	path: string,
-	mainModelName: string,
-	mappingProvider: Pipes.MappingProvider,
-	explicitMapping?: Map<string, string>
-): string {
-	// Check explicit mapping first
-	if (explicitMapping?.has(path)) {
-		return explicitMapping.get(path)!;
-	}
-
-	// If no dots, it's a simple field on main model
-	if (!path.includes('.')) {
-		return mappingProvider.getColumnName(mainModelName, path);
-	}
-
-	const parts = path.split('.');
-	const field = parts.pop()!;
-	const relationPath = parts.join('.');
-
-	// Check if there's explicit mapping for the relation part
-	if (explicitMapping?.has(relationPath)) {
-		const mappedRelation = explicitMapping.get(relationPath)!;
-		return `${mappedRelation}.${field}`;
-	}
-
-	// Auto-map using provider: Get the last relation name and map it
-	const relationName = parts[parts.length - 1];
-	const tableName = mappingProvider.getTableName(relationName);
-	const columnName = mappingProvider.getColumnName(relationName, field);
-
-	return `${tableName}.${columnName}`;
-}
-
-/**
- * Build SQL field expression for relationship
- */
-function buildSqlFieldPath(
-	path: string,
-	mainModelName: string,
-	mappingProvider: Pipes.MappingProvider,
-	tableAlias: string = 'main',
-	explicitMapping?: Map<string, string>
-): string {
-	if (!path.includes('.')) {
-		const columnName = mappingProvider.getColumnName(mainModelName, path);
-		return `${tableAlias}.${columnName}`;
-	}
-
-	const mappedPath = mapRelationshipPath(path, mainModelName, mappingProvider, explicitMapping);
-	return mappedPath;
 }
 
 /**
@@ -270,7 +192,7 @@ function getNestedValue(obj: any, path: string): any {
 }
 
 /**
- * Build Prisma aggregate object
+ * Build Prisma aggregate object (for non-grouped queries)
  */
 function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string, any> {
 	const aggregateObj: Record<string, any> = {};
@@ -296,111 +218,135 @@ function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string,
 }
 
 /**
- * Build raw SQL query for aggregation with relationships
+ * Build include object for fetching related data
+ * This is the KEY for handling relationships in aggregation
  */
-function buildRawSqlQuery(
-	tableName: string,
-	mainModelName: string,
-	mappingProvider: Pipes.MappingProvider,
-	aggregates: Pipes.AggregateSpec[],
-	groupBy: string[],
-	whereClause?: any,
-	explicitMapping?: Map<string, string>
-): { query: string; params: any[] } {
-	const params: any[] = [];
+function buildIncludeForRelationships(groupBy: string[]): Record<string, any> {
+	const include: Record<string, any> = {};
 
-	// Map main table name
-	const dbTableName = mappingProvider.getTableName(mainModelName);
-
-	// Build SELECT clause
-	const selectFields: string[] = [];
-	const aggregateFields: string[] = [];
-
-	// Add GROUP BY fields to SELECT
-	groupBy.forEach((field, idx) => {
-		const sqlField = buildSqlFieldPath(field, mainModelName, mappingProvider, 'main', explicitMapping);
-		selectFields.push(`${sqlField} as group_${idx}`);
-	});
-
-	// Add aggregate functions to SELECT
-	aggregates.forEach((agg, idx) => {
-		const { function: func, field } = agg;
-		const sqlField = buildSqlFieldPath(field, mainModelName, mappingProvider, 'main', explicitMapping);
-
-		let aggExpr: string;
-		switch (func) {
-			case 'sum':
-				aggExpr = `SUM(${sqlField})`;
-				break;
-			case 'avg':
-				aggExpr = `AVG(${sqlField})`;
-				break;
-			case 'min':
-				aggExpr = `MIN(${sqlField})`;
-				break;
-			case 'max':
-				aggExpr = `MAX(${sqlField})`;
-				break;
-			case 'count':
-				aggExpr = field === '*' ? 'COUNT(*)' : `COUNT(${sqlField})`;
-				break;
-			default:
-				aggExpr = `SUM(${sqlField})`;
-		}
-
-		aggregateFields.push(`${aggExpr} as agg_${func}_${idx}`);
-	});
-
-	const allSelectFields = [...selectFields, ...aggregateFields].join(', ');
-
-	// Build FROM clause with JOINs
-	let fromClause = `${dbTableName} as main`;
-	const joinedRelations = new Set<string>();
-
-	groupBy.forEach(field => {
+	for (const field of groupBy) {
 		if (field.includes('.')) {
-			const parts = field.split('.');
-			const relationName = parts[0];
+			const { relation } = parseRelationshipPath(field);
 
-			if (!joinedRelations.has(relationName)) {
-				const relationTableName = mappingProvider.getTableName(relationName);
-				const foreignKeys = mappingProvider.getForeignKey(mainModelName, relationName);
-				const primaryKeys = mappingProvider.getPrimaryKey(relationName);
+			// Build nested include structure
+			const parts = relation.split('.');
+			let current = include;
 
-				// Build JOIN condition for single or composite keys
-				const joinConditions = foreignKeys.map((fk, idx) => {
-					const fkColumn = mappingProvider.getColumnName(mainModelName, fk);
-					const pkColumn = primaryKeys[idx] || primaryKeys[0];
-					return `main.${fkColumn} = ${relationName}.${pkColumn}`;
-				}).join(' AND ');
-
-				fromClause += ` LEFT JOIN ${relationTableName} as ${relationName} ON ${joinConditions}`;
-				joinedRelations.add(relationName);
+			for (let i = 0; i < parts.length; i++) {
+				const part = parts[i];
+				if (i === parts.length - 1) {
+					// Last part - just include it
+					current[part] = true;
+				} else {
+					// Nested relation
+					if (!current[part]) {
+						current[part] = { include: {} };
+					}
+					current = current[part].include;
+				}
 			}
 		}
-	});
-
-	// Build WHERE clause
-	let whereClauseSql = '';
-	if (whereClause && Object.keys(whereClause).length > 0) {
-		whereClauseSql = 'WHERE 1=1';
 	}
 
-	// Build GROUP BY clause
-	const groupByClause = groupBy
-		.map((field, idx) => buildSqlFieldPath(field, mainModelName, mappingProvider, 'main', explicitMapping))
-		.join(', ');
+	return include;
+}
 
-	// Construct final query
-	const query = `
-		SELECT ${allSelectFields}
-		FROM ${fromClause}
-		${whereClauseSql}
-		GROUP BY ${groupByClause}
-		ORDER BY ${groupByClause}
-	`.trim();
+/**
+ * Perform manual aggregation with relationships
+ * This is the solution for Prisma's limitation with groupBy + relations
+ */
+async function manualAggregateWithRelationships(
+	prismaModel: any,
+	aggregates: Pipes.AggregateSpec[],
+	groupBy: string[],
+	where?: any
+): Promise<any[]> {
+	// Step 1: Fetch all data with relationships included
+	const include = buildIncludeForRelationships(groupBy);
 
-	return { query, params };
+	const allData = await prismaModel.findMany({
+		where,
+		include: Object.keys(include).length > 0 ? include : undefined,
+	});
+
+	// Step 2: Group data manually
+	const groups = new Map<string, any[]>();
+
+	for (const item of allData) {
+		// Build group key from groupBy fields
+		const groupKey = groupBy.map(field => {
+			const value = getNestedValue(item, field);
+			return String(value ?? 'null');
+		}).join('|||');
+
+		if (!groups.has(groupKey)) {
+			groups.set(groupKey, []);
+		}
+		groups.get(groupKey)!.push(item);
+	}
+
+	// Step 3: Calculate aggregates for each group
+	const results: any[] = [];
+
+	for (const [groupKey, items] of groups.entries()) {
+		const result: any = {};
+
+		// Add group by fields to result
+		const groupKeyParts = groupKey.split('|||');
+		groupBy.forEach((field, idx) => {
+			const { relation, field: fieldName } = field.includes('.')
+				? parseRelationshipPath(field)
+				: { relation: '', field };
+
+			if (relation) {
+				// Store as nested object for consistency
+				if (!result[relation]) {
+					result[relation] = {};
+				}
+				result[relation][fieldName] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+			} else {
+				result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+			}
+		});
+
+		// Calculate aggregates
+		for (const agg of aggregates) {
+			const { function: func, field } = agg;
+			const funcKey = `_${func}`;
+
+			if (func === 'count') {
+				result._count = result._count || {};
+				result._count[field] = items.length;
+			} else {
+				result[funcKey] = result[funcKey] || {};
+
+				const values = items
+					.map(item => getNestedValue(item, field))
+					.filter(v => v != null && typeof v === 'number');
+
+				switch (func) {
+					case 'sum':
+						result[funcKey][field] = values.reduce((acc, v) => acc + v, 0);
+						break;
+					case 'avg':
+						result[funcKey][field] = values.length > 0
+							? values.reduce((acc, v) => acc + v, 0) / values.length
+							: 0;
+						break;
+					case 'min':
+						result[funcKey][field] = values.length > 0 ? Math.min(...values) : 0;
+						break;
+					case 'max':
+						result[funcKey][field] = values.length > 0 ? Math.max(...values) : 0;
+						break;
+				}
+			}
+		}
+
+		results.push(result);
+	}
+
+	return results;
 }
 
 /**
@@ -414,6 +360,7 @@ function transformToChartSeries(
 ): Pipes.ChartSeries {
 	const dataArray = Array.isArray(data) ? data : [];
 
+	// Empty data handling
 	if (!dataArray || dataArray.length === 0) {
 		const series = aggregates.map(agg => ({
 			name: `${agg.function}(${agg.field})`,
@@ -451,6 +398,7 @@ function transformToChartSeries(
 
 		const timeLabels = generateTimeSeriesLabels(chartConfig.interval, year);
 
+		// Grouped time series
 		if (hasGrouping) {
 			const groupField = chartConfig.groupField || nonDateGroupFields[0];
 			const groupedDataMap = new Map<string, Map<string, any[]>>();
@@ -512,6 +460,7 @@ function transformToChartSeries(
 			};
 		}
 
+		// Regular time series
 		const dataMap = new Map<string, any[]>();
 
 		dataArray.forEach(item => {
@@ -559,7 +508,7 @@ function transformToChartSeries(
 		};
 	}
 
-	// Grouped chart
+	// Grouped (non-time-series) chart
 	if (groupBy && groupBy.length > 0) {
 		const categoryField = chartConfig?.groupField || groupBy[0];
 
@@ -595,7 +544,7 @@ function transformToChartSeries(
 		};
 	}
 
-	// Regular chart
+	// Regular chart (no grouping)
 	const categories = dataArray.map((_, idx) => `Category ${idx + 1}`);
 
 	const series = aggregates.map((agg: Pipes.AggregateSpec) => {
@@ -623,32 +572,15 @@ function transformToChartSeries(
 }
 
 /**
- * @description Parse aggregate query string with table mapping support
- *
- * Format: aggregate=field1: sum(), field2: count(), groupBy: (field), groupByMapping: (table.column), chart: type
- *
- * Examples:
+ * Aggregate Pipe - Enhanced with relationship support
  * 
- * 1. With explicit mapping:
- *    aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), groupByMapping: (market_master_category.category)
- *
- * 2. With auto-mapping (uses injected Pipes.MappingProvider):
- *    aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
- *
- * 3. Multiple fields mapping:
- *    aggregate=qty: sum(), groupBy: (category, region), groupByMapping: (product_category, warehouse_region)
+ * Now supports:
+ * - Regular aggregation: aggregate=qty: sum(), recQty: sum()
+ * - Grouped aggregation WITH relationships: aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
+ * - Charts with relationships: aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), chart: bar
  */
 @Injectable()
 export default class AggregatePipe implements PipeTransform {
-	private mappingProvider: Pipes.MappingProvider;
-
-	constructor(
-		private readonly mainModelName: string,
-		mappingProvider?: Pipes.MappingProvider
-	) {
-		this.mappingProvider = mappingProvider || new DefaultMappingProvider();
-	}
-
 	transform(value: string): Pipes.Aggregate | undefined {
 		if (!value || value.trim() === '') return undefined;
 
@@ -662,10 +594,8 @@ export default class AggregatePipe implements PipeTransform {
 			const aggregates: Pipes.AggregateSpec[] = [];
 			let chartConfig: Pipes.ChartConfig | undefined;
 			let groupByFields: string[] = [];
-			let groupByMapping: Map<string, string> | undefined;
 
 			for (const [key, val] of parsed) {
-				// Handle chart configuration
 				if (key.toLowerCase() === 'chart' && val) {
 					const config = parseChartConfig(val);
 					if (config) {
@@ -674,7 +604,6 @@ export default class AggregatePipe implements PipeTransform {
 					}
 				}
 
-				// Handle groupBy configuration
 				if (key.toLowerCase() === 'groupby') {
 					if (val) {
 						const fields = parseGroupBy(val);
@@ -693,28 +622,6 @@ export default class AggregatePipe implements PipeTransform {
 					}
 				}
 
-				// Handle groupByMapping configuration
-				if (key.toLowerCase() === 'groupbymapping') {
-					if (val) {
-						const mappingFields = parseGroupBy(val);
-						if (mappingFields && mappingFields.length > 0) {
-							groupByMapping = new Map();
-							// Map each groupBy field to its corresponding mapping
-							groupByFields.forEach((field, idx) => {
-								if (mappingFields[idx]) {
-									groupByMapping!.set(field, mappingFields[idx]);
-								}
-							});
-							continue;
-						} else {
-							throw new BadRequestException(
-								'Invalid groupByMapping format. Use: groupByMapping: (table.column) or groupByMapping: (table1.col1, table2.col2)'
-							);
-						}
-					}
-				}
-
-				// Handle aggregate functions
 				if (val) {
 					const aggFunc = parseAggregateFunction(val);
 					if (aggFunc) {
@@ -731,7 +638,6 @@ export default class AggregatePipe implements PipeTransform {
 				throw new BadRequestException('At least one aggregate function is required');
 			}
 
-			// Determine groupBy
 			let finalGroupBy: string[] = [];
 			if (groupByFields.length > 0) {
 				finalGroupBy = groupByFields;
@@ -742,30 +648,22 @@ export default class AggregatePipe implements PipeTransform {
 			}
 
 			const isGrouped = finalGroupBy.length > 0;
-			const useRawQuery = isGrouped && hasRelationshipInGroupBy(finalGroupBy);
+			const hasRelationship = isGrouped && hasRelationshipInGroupBy(finalGroupBy);
 
 			if (isGrouped) {
-				if (useRawQuery) {
+				if (hasRelationship) {
+					// Use manual aggregation for relationships
 					return {
 						prismaQuery: null as any,
 						aggregates,
 						groupBy: finalGroupBy,
 						isGrouped: true,
 						chartConfig,
-						useRawQuery: true,
-						rawQueryBuilder: (tableName: string, whereClause?: any) =>
-							buildRawSqlQuery(
-								tableName,
-								this.mainModelName,
-								this.mappingProvider,
-								aggregates,
-								finalGroupBy,
-								whereClause,
-								groupByMapping
-							),
+						useManualAggregation: true, // NEW FLAG
 					};
 				}
 
+				// Standard Prisma groupBy (no relationships)
 				const prismaQuery = buildPrismaAggregate(aggregates);
 				return {
 					prismaQuery: {
@@ -776,7 +674,7 @@ export default class AggregatePipe implements PipeTransform {
 					groupBy: finalGroupBy,
 					isGrouped: true,
 					chartConfig,
-					useRawQuery: false,
+					useManualAggregation: false,
 				};
 			}
 
@@ -787,13 +685,45 @@ export default class AggregatePipe implements PipeTransform {
 				groupBy: [],
 				isGrouped: false,
 				chartConfig,
-				useRawQuery: false,
+				useManualAggregation: false,
 			};
 		} catch (error) {
 			if (error instanceof BadRequestException) throw error;
 			console.error('Error parsing aggregate query:', error);
 			throw new BadRequestException('Invalid aggregate query format');
 		}
+	}
+
+	/**
+	 * Execute aggregate query - handles both Prisma native and manual aggregation
+	 */
+	static async execute(
+		prismaModel: any,
+		aggregateConfig: Pipes.Aggregate,
+		where?: any
+	): Promise<any> {
+		if (aggregateConfig.useManualAggregation) {
+			// Use manual aggregation for relationships
+			return manualAggregateWithRelationships(
+				prismaModel,
+				aggregateConfig.aggregates,
+				aggregateConfig.groupBy,
+				where
+			);
+		}
+
+		// Use Prisma's native aggregation
+		if (aggregateConfig.isGrouped) {
+			return prismaModel.groupBy({
+				...aggregateConfig.prismaQuery,
+				where,
+			});
+		}
+
+		return prismaModel.aggregate({
+			...aggregateConfig.prismaQuery,
+			where,
+		});
 	}
 
 	/**
@@ -857,3 +787,6 @@ export default class AggregatePipe implements PipeTransform {
 		);
 	}
 }
+
+// Export the manual aggregation function for external use
+export { manualAggregateWithRelationships };

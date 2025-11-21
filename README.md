@@ -8,633 +8,530 @@ No more manual parsing — just pass query params, and you're good to go 🚀
 
 ## 📜 Changelog
 
-### [2.4.5] - 2025 🎉 NEW - Table Mapping Support
+### [2.4.6] - 2025 🔥 NEW
 
-#### 🚀 Added - Flexible Table Mapping for Raw Queries
+#### 🚀 Added - Manual Aggregation for Nested Relationships
 
 ##### The Problem
-When your Prisma model names don't match database table names (e.g., `MarketingMasterCategory` model → `market_master_category` table), raw SQL queries fail:
-
+Prisma's `groupBy` doesn't support relationship fields directly:
 ```typescript
-// ❌ This fails when model name ≠ table name
-?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
-// Error: Table 'MarketingMasterCategory' doesn't exist
+// ❌ This doesn't work with Prisma
+groupBy: {
+  by: ['marketingMasterCategory.category'] // Error: Can't group by relation
+}
 ```
 
 ##### The Solution
-**Three Ways to Map Models to Tables:**
-
-1. **Auto-Mapping** via Prisma DMMF (Recommended)
-2. **Explicit Mapping** via `groupByMapping` parameter
-3. **Hybrid Approach** (Auto + Manual override)
-
----
-
-#### 🎯 Method 1: Auto-Mapping (Recommended)
-
-##### Setup Prisma DMMF Provider
-
-**Step 1: Create Mapping Provider**
+**Manual In-Memory Aggregation** - When `AggregatePipe` detects relationship fields (containing `.`), it automatically switches to manual aggregation mode!
 
 ```typescript
-// src/utils/prisma-mapping.provider.ts
-import { Prisma } from '@prisma/client';
-import { MappingProvider } from '@dwcahyo/nestjs-prisma-pipes';
+// ✅ This now works!
+?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
+```
 
-export class PrismaMappingProvider implements MappingProvider {
-  private tableNameCache: Map<string, string>;
-  private fieldMappingCache: Map<string, Map<string, string>>;
+##### Features
+- **🔍 Auto-Detection**: Automatically detects relationship fields (fields with `.`)
+- **🔄 Seamless Fallback**: Uses standard Prisma for simple fields, manual aggregation for relationships
+- **🔗 Auto-Include**: Automatically includes relationships using Prisma's `include`
+- **📊 Chart Compatible**: Works with all chart types and time series
+- **🎯 Type Safe**: Full TypeScript support with proper types
+- **✨ Simple**: No raw SQL, no complex queries - just fetch and process
 
-  constructor() {
-    this.tableNameCache = new Map();
-    this.fieldMappingCache = new Map();
-    this.initializeCache();
-  }
+##### How It Works
 
-  private initializeCache() {
-    try {
-      const dmmf = Prisma.dmmf;
+**1. Simple Fields (Standard Prisma)**
+```url
+?aggregate=qty: sum(), groupBy: (category)
+```
+→ Uses Prisma `groupBy` (faster, native)
 
-      // Map model names to database table names
-      for (const model of dmmf.datamodel.models) {
-        const tableName = model.dbName || model.name;
-        this.tableNameCache.set(model.name, tableName);
+**2. Relationship Fields (Manual Aggregation)**
+```url
+?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
+```
+→ Fetches data with `include`, groups and aggregates in-memory
 
-        // Map field names to column names
-        const fieldMap = new Map<string, string>();
-        for (const field of model.fields) {
-          const columnName = field.dbName || field.name;
-          fieldMap.set(field.name, columnName);
-        }
-        this.fieldMappingCache.set(model.name, fieldMap);
-      }
+**3. Mixed Fields (Manual Aggregation)**
+```url
+?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category, warehouse.region)
+```
+→ Handles multiple relationships automatically
 
-      console.log('✅ Prisma DMMF mapping initialized');
-    } catch (error) {
-      console.warn('⚠️ Failed to initialize Prisma DMMF mapping:', error);
-    }
-  }
+##### Processing Flow
 
-  getTableName(modelName: string): string {
-    return this.tableNameCache.get(modelName) || modelName;
-  }
+When relationship fields are detected:
 
-  getColumnName(modelName: string, fieldName: string): string {
-    const fieldMap = this.fieldMappingCache.get(modelName);
-    return fieldMap?.get(fieldName) || fieldName;
+```mermaid
+graph LR
+    A[Detect Relationship] --> B[Build Include Object]
+    B --> C[Fetch All Data with Relations]
+    C --> D[Group Data by Key]
+    D --> E[Calculate Aggregates]
+    E --> F[Return Results]
+```
+
+**Step 1: Fetch with Relationships**
+```typescript
+// Auto-generated include
+{
+  include: {
+    marketingMasterCategory: true,
+    warehouse: true
   }
 }
 ```
 
-**Step 2: Register as Provider**
-
+**Step 2: Group In-Memory**
 ```typescript
-// src/app.module.ts
-import { Module, Global } from '@nestjs/common';
-import { PrismaMappingProvider } from './utils/prisma-mapping.provider';
-
-@Global()
-@Module({
-  providers: [
-    {
-      provide: 'MAPPING_PROVIDER',
-      useClass: PrismaMappingProvider,
-    },
-  ],
-  exports: ['MAPPING_PROVIDER'],
-})
-export class AppModule {}
+// Groups by composite key
+"Electronics|||Warehouse A" -> [item1, item2, ...]
+"Clothing|||Warehouse B" -> [item3, item4, ...]
 ```
 
-**Step 3: Use in Controller**
-
+**Step 3: Calculate Aggregates**
 ```typescript
-// src/products/products.controller.ts
-import { Controller, Get, Query, Inject } from '@nestjs/common';
-import { AggregatePipe, MappingProvider, Pipes } from '@dwcahyo/nestjs-prisma-pipes';
-
-@Controller('products')
-export class ProductsController {
-  constructor(
-    @Inject('MAPPING_PROVIDER') private mappingProvider: MappingProvider,
-    private prisma: PrismaService
-  ) {}
-
-  @Get('stats')
-  async getStats(
-    @Query('aggregate') aggregateStr: string,
-    @Query('where', WherePipe) where?: Pipes.Where,
-  ) {
-    // Inject mapping provider into pipe
-    const pipe = new AggregatePipe('Product', this.mappingProvider);
-    const aggregate = pipe.transform(aggregateStr);
-
-    if (!aggregate) {
-      throw new BadRequestException('Invalid aggregate query');
-    }
-
-    // Handle raw query with auto-mapping
-    if (aggregate.useRawQuery && aggregate.rawQueryBuilder) {
-      const { query, params } = aggregate.rawQueryBuilder('Product', where);
-      const rawData = await this.prisma.$queryRawUnsafe(query, ...params);
-      const transformedData = this.transformRawResults(rawData, aggregate);
-      return AggregatePipe.toChartSeries(transformedData, aggregate);
-    }
-
-    // Standard Prisma query
-    return this.prisma.product.groupBy({
-      where,
-      ...aggregate.prismaQuery,
-    }).then(data => AggregatePipe.toChartSeries(data, aggregate));
-  }
+// For each group, calculate sum, avg, min, max, count
+{ 
+  marketingMasterCategory: { category: "Electronics" },
+  _sum: { qty: 1500 },
+  _avg: { qty: 150 }
 }
 ```
 
-**Query Example:**
-```bash
-# Auto-maps: marketingMasterCategory → market_master_category
-GET /products/stats?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
-```
+##### Service Layer Implementation
 
-**Generated SQL:**
-```sql
-SELECT 
-  market_master_category.category as group_0,
-  SUM(main.qty) as agg_sum_0
-FROM Product as main
-LEFT JOIN market_master_category as marketingMasterCategory 
-  ON main.marketing_master_category_id = marketingMasterCategory.id
-GROUP BY market_master_category.category
-```
-
----
-
-#### 🎯 Method 2: Explicit Mapping
-
-Use `groupByMapping` parameter to manually specify table names:
-
-**Query Example:**
-```bash
-GET /products/stats?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), groupByMapping: (market_master_category.category)
-```
-
-**Multiple Fields:**
-```bash
-GET /products/stats?aggregate=qty: sum(), recQty: avg(), groupBy: (category, warehouse.region, createdAt), groupByMapping: (product_category, warehouses.region_name, created_at)
-```
-
-**How It Works:**
-- `groupBy` fields are mapped 1:1 with `groupByMapping` fields
-- First field in `groupBy` → First field in `groupByMapping`
-- Second field in `groupBy` → Second field in `groupByMapping`
-- And so on...
-
-**Advantages:**
-- ✅ No setup required
-- ✅ Works without Prisma in library
-- ✅ Explicit control over mapping
-- ✅ Override auto-mapping when needed
-
-**Disadvantages:**
-- ❌ Verbose query strings
-- ❌ Manual maintenance
-- ❌ Error-prone
-
----
-
-#### 🎯 Method 3: Hybrid Approach
-
-Combine auto-mapping with manual overrides:
+**Option 1: Using Static Execute Method (Recommended)**
 
 ```typescript
-// Use auto-mapping by default
-const pipe = new AggregatePipe('Product', mappingProvider);
-
-// Override specific fields in query
-GET /products/stats?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category, specialField), groupByMapping: (market_master_category.category, custom_special_field)
-```
-
-**Priority:**
-1. `groupByMapping` (highest)
-2. `MappingProvider` (auto)
-3. Identity mapping (fallback)
-
----
-
-#### 📋 Prisma Schema Setup
-
-**Option A: Use @map directive (Recommended)**
-
-```prisma
-// prisma/schema.prisma
-model MarketingMasterCategory {
-  id        Int       @id @default(autoincrement())
-  category  String
-  products  Product[]
-  
-  @@map("market_master_category")  // ← Maps model to table
-}
-
-model Product {
-  id                          Int                      @id @default(autoincrement())
-  qty                         Int
-  marketingMasterCategoryId   Int                      @map("marketing_master_category_id")
-  
-  marketingMasterCategory     MarketingMasterCategory  @relation(fields: [marketingMasterCategoryId], references: [id])
-  
-  @@map("products")
-}
-```
-
-**Option B: Match model names to table names**
-
-```prisma
-// If your tables use PascalCase
-model MarketingMasterCategory {
-  id        Int       @id @default(autoincrement())
-  category  String
-  // No @map needed if table name is "MarketingMasterCategory"
-}
-```
-
----
-
-#### 🔄 Migration Guide v2.4.4 → v2.4.5
-
-**Before (v2.4.4):**
-```typescript
-// Only worked when model name = table name
-@Get('stats')
-async getStats(
-  @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate
-) {
-  // Would fail if model name ≠ table name
-}
-```
-
-**After (v2.4.5):**
-
-**Option 1: With Auto-Mapping**
-```typescript
-import { MappingProvider, AggregatePipe } from '@dwcahyo/nestjs-prisma-pipes';
-
-@Get('stats')
-async getStats(
-  @Query('aggregate') aggregateStr: string,
-  @Inject('MAPPING_PROVIDER') mappingProvider?: MappingProvider
-) {
-  const pipe = new AggregatePipe('Product', mappingProvider);
-  const aggregate = pipe.transform(aggregateStr);
-  // Now works regardless of table names
-}
-```
-
-**Option 2: With Explicit Mapping**
-```typescript
-// No code changes needed!
-// Just add groupByMapping to query string
-GET /products/stats?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), groupByMapping: (market_master_category.category)
-```
-
----
-
-#### 🏗️ Service Layer Best Practices
-
-**Generic Service with Mapping:**
-
-```typescript
-import { Injectable, Inject } from '@nestjs/common';
-import { AggregatePipe, MappingProvider, Pipes } from '@dwcahyo/nestjs-prisma-pipes';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
+import { Pipes, AggregatePipe } from '@dwcahyo/nestjs-prisma-pipes';
+
+@Injectable()
+export class ProductService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async stat(
+    filter?: Pipes.Where,
+    aggregate?: Pipes.Aggregate,
+  ): Promise<Pipes.ChartSeries> {
+    if (!aggregate) {
+      throw new BadRequestException('Aggregate query is required');
+    }
+
+    try {
+      // AggregatePipe.execute handles everything:
+      // - Detects if manual aggregation is needed
+      // - Fetches data with relationships
+      // - Performs grouping and calculations
+      // - Returns Prisma-compatible format
+      const data = await AggregatePipe.execute(
+        this.prisma.product,
+        aggregate,
+        filter
+      );
+
+      // Transform to chart format
+      return AggregatePipe.toChartSeries(data, aggregate);
+    } catch (error) {
+      console.error('Aggregate error:', error);
+      throw new BadRequestException(
+        `Failed to execute aggregate query: ${error.message}`
+      );
+    }
+  }
+}
+```
+
+**Option 2: Generic Base Service**
+
+```typescript
+import { Injectable, BadRequestException } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+import { Pipes, AggregatePipe } from '@dwcahyo/nestjs-prisma-pipes';
 
 @Injectable()
 export class BaseService<T> {
   constructor(
     protected readonly prisma: PrismaService,
     protected readonly modelName: string,
-    @Inject('MAPPING_PROVIDER') protected readonly mappingProvider?: MappingProvider
   ) {}
 
   async stat(
-    aggregateStr: string,
     filter?: Pipes.Where,
+    aggregate?: Pipes.Aggregate,
   ): Promise<Pipes.ChartSeries> {
-    // Create pipe with mapping provider
-    const pipe = new AggregatePipe(
-      this.getModelName(), 
-      this.mappingProvider
-    );
-    
-    const aggregate = pipe.transform(aggregateStr);
-
     if (!aggregate) {
-      throw new BadRequestException('Invalid aggregate query');
+      throw new BadRequestException('Aggregate query is required');
     }
 
-    if (aggregate.useRawQuery && aggregate.rawQueryBuilder) {
-      // Use raw SQL with auto-mapping
-      const { query, params } = aggregate.rawQueryBuilder(
-        this.getModelName(),
+    try {
+      const model = this.prisma[this.modelName];
+      
+      // Single method handles all cases
+      const data = await AggregatePipe.execute(
+        model,
+        aggregate,
         filter
       );
-      
-      const rawData = await this.prisma.$queryRawUnsafe(query, ...params);
-      const transformedData = this.transformRawResults(rawData, aggregate);
-      
-      return AggregatePipe.toChartSeries(transformedData, aggregate);
+
+      return AggregatePipe.toChartSeries(data, aggregate);
+    } catch (error) {
+      console.error('Aggregate error:', error);
+      throw new BadRequestException(
+        `Failed to execute aggregate query: ${error.message}`
+      );
     }
-
-    // Standard Prisma query
-    const model = this.prisma[this.modelName];
-    return model.groupBy({
-      where: filter,
-      ...aggregate.prismaQuery,
-    }).then(data => AggregatePipe.toChartSeries(data, aggregate));
-  }
-
-  protected getModelName(): string {
-    // Convert to PascalCase if needed
-    return this.modelName.charAt(0).toUpperCase() + this.modelName.slice(1);
-  }
-
-  protected transformRawResults(rawData: any[], aggregate: Pipes.Aggregate): any[] {
-    return rawData.map(row => {
-      const transformed: any = {};
-      
-      // Map group fields
-      aggregate.groupBy.forEach((field, idx) => {
-        const groupKey = `group_${idx}`;
-        if (row[groupKey] !== undefined) {
-          if (field.includes('.')) {
-            const parts = field.split('.');
-            let current = transformed;
-            
-            for (let i = 0; i < parts.length - 1; i++) {
-              if (!current[parts[i]]) current[parts[i]] = {};
-              current = current[parts[i]];
-            }
-            current[parts[parts.length - 1]] = row[groupKey];
-          } else {
-            transformed[field] = row[groupKey];
-          }
-        }
-      });
-      
-      // Map aggregate results
-      aggregate.aggregates.forEach((agg, idx) => {
-        const { function: func, field } = agg;
-        const aggKey = `agg_${func}_${idx}`;
-        
-        if (row[aggKey] !== undefined) {
-          if (!transformed[`_${func}`]) transformed[`_${func}`] = {};
-          transformed[`_${func}`][field] = parseFloat(row[aggKey]) || 0;
-        }
-      });
-      
-      return transformed;
-    });
   }
 }
-```
 
-**Usage:**
-```typescript
+// Usage in specific services
 @Injectable()
 export class ProductService extends BaseService<Product> {
-  constructor(
-    prisma: PrismaService,
-    @Inject('MAPPING_PROVIDER') mappingProvider: MappingProvider
-  ) {
-    super(prisma, 'product', mappingProvider);
+  constructor(prisma: PrismaService) {
+    super(prisma, 'product');
+  }
+}
+
+@Injectable()
+export class OrderService extends BaseService<Order> {
+  constructor(prisma: PrismaService) {
+    super(prisma, 'order');
   }
 }
 ```
 
----
-
-#### 🧪 Testing
+**Controller Usage:**
 
 ```typescript
-describe('AggregatePipe - Table Mapping', () => {
-  let mappingProvider: MappingProvider;
-  let pipe: AggregatePipe;
+import { Controller, Get, Query } from '@nestjs/common';
+import { ProductService } from './product.service';
+import { Pipes, WherePipe, AggregatePipe } from '@dwcahyo/nestjs-prisma-pipes';
 
-  beforeEach(() => {
-    mappingProvider = {
-      getTableName: (name) => name === 'MarketingMasterCategory' 
-        ? 'market_master_category' 
-        : name,
-      getColumnName: (model, field) => field,
-    };
-    
-    pipe = new AggregatePipe('Product', mappingProvider);
-  });
+@Controller('products')
+export class ProductController {
+  constructor(private readonly productService: ProductService) {}
 
-  it('should use auto-mapping', () => {
-    const result = pipe.transform(
-      'qty: sum(), groupBy: (marketingMasterCategory.category)'
-    );
-    
-    const { query } = result!.rawQueryBuilder!('Product');
-    expect(query).toContain('market_master_category');
-  });
-
-  it('should use explicit mapping', () => {
-    const result = pipe.transform(
-      'qty: sum(), groupBy: (category), groupByMapping: (custom_category)'
-    );
-    
-    const { query } = result!.rawQueryBuilder!('Product');
-    expect(query).toContain('custom_category');
-  });
-
-  it('should prioritize explicit over auto', () => {
-    const result = pipe.transform(
-      'qty: sum(), groupBy: (marketingMasterCategory.category), groupByMapping: (override_table.override_col)'
-    );
-    
-    const { query } = result!.rawQueryBuilder!('Product');
-    expect(query).toContain('override_table.override_col');
-    expect(query).not.toContain('market_master_category');
-  });
-});
+  @Get('stats')
+  async getStats(
+    @Query('where', WherePipe) where?: Pipes.Where,
+    @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate
+  ): Promise<Pipes.ChartSeries> {
+    return this.productService.stat(where, aggregate);
+  }
+}
 ```
 
----
+##### Real-World Examples
 
-#### 📊 Real-World Examples
-
-**Example 1: E-Commerce Dashboard**
+**Example 1: Sales by Category (Relationship)**
 ```bash
-# Auto-mapped query
-GET /products/stats?aggregate=revenue: sum(), quantity: count(), groupBy: (productCategory.name, warehouse.location), chart: bar(productCategory.name, horizontal)
+GET /products/stats?aggregate=qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
 ```
 
-**Example 2: Supply Chain Analytics**
-```bash
-# Mixed: auto-map category, explicit-map warehouse
-GET /inventory/stats?aggregate=stock: sum(), groupBy: (productCategory.name, warehouse.region), groupByMapping: (product_categories.category_name, wh_locations.region_code), chart: pie
+**What happens:**
+1. Pipe detects `.` in `marketingMasterCategory.category`
+2. Sets `useManualAggregation: true`
+3. Builds include: `{ marketingMasterCategory: true }`
+4. Fetches all products with category data
+5. Groups by category in-memory
+6. Calculates sum(qty) and sum(recQty) for each group
+
+**Result:**
+```json
+{
+  "categories": ["Electronics", "Clothing", "Food"],
+  "series": [
+    {
+      "name": "sum(qty)",
+      "data": [1500, 800, 1200]
+    },
+    {
+      "name": "sum(recQty)",
+      "data": [150, 80, 120]
+    }
+  ],
+  "chartType": "bar",
+  "horizontal": true
+}
 ```
+
+**Example 2: Regional Performance**
+```bash
+GET /products/stats?aggregate=qty: sum(), groupBy: (warehouse.region, marketingMasterCategory.category), chart: bar(warehouse.region, stacked)
+```
+
+**Manual aggregation:**
+- Fetches with `{ warehouse: true, marketingMasterCategory: true }`
+- Groups by composite key: `region|||category`
+- Stacks series by category per region
 
 **Example 3: Time Series with Relationships**
 ```bash
-# Sales trend per category over time
-GET /sales/stats?aggregate=amount: sum(), groupBy: (productCategory.name, orderDate), chart: line(orderDate, month)
+GET /orders/stats?aggregate=revenue: sum(), groupBy: (customer.segment, orderDate), chart: line(orderDate, month)
 ```
 
----
+**Processing:**
+- Includes `customer` relation
+- Groups by segment + month
+- Creates separate line series per segment
 
-#### ⚡ Performance Tips
+##### Configuration Required
 
-1. **Add Indexes:**
-```sql
--- Index foreign keys used in JOINs
-CREATE INDEX idx_product_category_id ON products(marketing_master_category_id);
-CREATE INDEX idx_product_warehouse_id ON products(warehouse_id);
-
--- Index group by columns
-CREATE INDEX idx_category_name ON market_master_category(category);
-```
-
-2. **Use Auto-Mapping:**
-   - Faster development
-   - Less error-prone
-   - Auto-updates with schema changes
-
-3. **Cache Mapping Provider:**
-   - Initialize once at startup
-   - Register as singleton provider
-   - Reuse across all services
-
-4. **Profile Queries:**
-```typescript
-const startTime = Date.now();
-const result = await this.stat(aggregateStr, filter);
-console.log(`Query took ${Date.now() - startTime}ms`);
-```
-
----
-
-#### 🐛 Troubleshooting
-
-**Issue 1: "Table doesn't exist"**
-```typescript
-// Check mapping provider is injected
-constructor(
-  @Inject('MAPPING_PROVIDER') private mappingProvider: MappingProvider // ← Must inject
-) {}
-```
-
-**Issue 2: "Column not found"**
-```typescript
-// Verify @map directives in schema
+**Update your Prisma schema:**
+```prisma
+// prisma/schema.prisma
 model Product {
-  categoryId Int @map("category_id") // ← Must match DB column
-}
-```
-
-**Issue 3: "Cannot read getTableName"**
-```typescript
-// MappingProvider not registered
-// Check app.module.ts has provider configuration
-```
-
-**Issue 4: "Explicit mapping not working"**
-```typescript
-// Ensure format is correct
-groupBy: (field1, field2),
-groupByMapping: (table1.col1, table2.col2) // Same order!
-```
-
----
-
-### [2.4.4] - 2025 🔥 Raw Query Support
-
-(Previous changelog content...)
-
----
-
-## 📦 Installation
-
-```bash
-npm install @dwcahyo/nestjs-prisma-pipes
-```
-
----
-
-## 🚀 Feature Comparison
-
-| Feature | v2.4.3 | v2.4.4 | v2.4.5 |
-|---------|--------|--------|--------|
-| Basic Aggregation | ✅ | ✅ | ✅ |
-| Relationship GroupBy | ❌ | ✅ | ✅ |
-| Raw SQL Support | ❌ | ✅ | ✅ |
-| Auto-Detection | ❌ | ✅ | ✅ |
-| **Table Mapping** | ❌ | ❌ | ✅ 🎉 |
-| **MappingProvider** | ❌ | ❌ | ✅ 🎉 |
-| **Explicit Mapping** | ❌ | ❌ | ✅ 🎉 |
-| Prisma DMMF Integration | ❌ | ❌ | ✅ 🎉 |
-
----
-
-## 📝 API Reference
-
-### MappingProvider Interface
-
-```typescript
-export interface MappingProvider {
-  /**
-   * Get database table name from model name
-   * @param modelName - Prisma model name (e.g., 'MarketingMasterCategory')
-   * @returns Database table name (e.g., 'market_master_category')
-   */
-  getTableName(modelName: string): string;
+  id                          Int                      @id @default(autoincrement())
+  qty                         Int
+  recQty                      Int
+  marketingMasterCategoryId   Int
+  warehouseId                 Int
   
-  /**
-   * Get database column name from model field name
-   * @param modelName - Prisma model name
-   * @param fieldName - Model field name
-   * @returns Database column name
-   */
-  getColumnName(modelName: string, fieldName: string): string;
+  // Define relations
+  marketingMasterCategory     MarketingMasterCategory  @relation(fields: [marketingMasterCategoryId], references: [id])
+  warehouse                   Warehouse                @relation(fields: [warehouseId], references: [id])
+}
+
+model MarketingMasterCategory {
+  id        Int       @id @default(autoincrement())
+  category  String
+  products  Product[]
+}
+
+model Warehouse {
+  id        Int       @id @default(autoincrement())
+  region    String
+  products  Product[]
 }
 ```
 
-### AggregatePipe Constructor
+**No special configuration needed** - the pipe automatically:
+- Detects relationships
+- Builds include objects
+- Handles nested structures
+- Performs calculations
+
+##### TypeScript Types
 
 ```typescript
-class AggregatePipe {
-  constructor(
-    modelName: string,              // Prisma model name
-    mappingProvider?: MappingProvider // Optional: for auto-mapping
-  )
+export namespace Pipes {
+  export interface Aggregate {
+    prismaQuery: {
+      by?: string[];
+      _sum?: Record<string, true>;
+      _avg?: Record<string, true>;
+      _min?: Record<string, true>;
+      _max?: Record<string, true>;
+      _count?: true | Record<string, true>;
+    } | null; // null when useManualAggregation is true
+    aggregates: AggregateSpec[];
+    groupBy: string[];
+    isGrouped: boolean;
+    chartConfig?: ChartConfig;
+    
+    // NEW in v2.4.6
+    useManualAggregation: boolean;
+  }
 }
 ```
 
-### Query Parameters
+##### Migration Guide
 
+**Before (v2.4.2 and earlier):**
 ```typescript
-// Aggregate query format
-aggregate=field1: function(), field2: function(), groupBy: (fields), groupByMapping: (table.column), chart: type
+// This would fail with relationship fields
+async stat(filter?: Pipes.Where, aggregate?: Pipes.Aggregate) {
+  const data = await this.prisma.product.groupBy({
+    where: filter,
+    ...aggregate.prismaQuery, // Error if groupBy has relationship
+  });
+  
+  return AggregatePipe.toChartSeries(data, aggregate);
+}
+```
 
-// Parameters:
-// - field: Model field name
-// - function: sum | avg | min | max | count
-// - groupBy: Comma-separated fields in parentheses
-// - groupByMapping: Corresponding table.column names
-// - chart: Chart configuration
+**After (v2.4.6):**
+```typescript
+// Now handles both simple and relationship fields automatically
+async stat(filter?: Pipes.Where, aggregate?: Pipes.Aggregate) {
+  // Single method handles everything
+  const data = await AggregatePipe.execute(
+    this.prisma.product,
+    aggregate,
+    filter
+  );
+  
+  return AggregatePipe.toChartSeries(data, aggregate);
+}
+```
+
+##### Performance Considerations
+
+**Prisma groupBy vs Manual Aggregation:**
+
+| Aspect | Prisma groupBy | Manual Aggregation |
+|--------|---------------|-------------------|
+| **Speed** | ⚡ Faster (database-level) | 🔸 Slower (in-memory) |
+| **Memory** | ✅ Minimal | ⚠️ Loads all data |
+| **Relationships** | ❌ Not supported | ✅ Fully supported |
+| **Flexibility** | 🔸 Limited | ✅ Full control |
+| **When to use** | Simple fields | Nested relationships |
+
+**Best Practices:**
+
+1. **Use simple fields when possible** - Prisma groupBy is faster
+   ```url
+   ✅ ?aggregate=qty: sum(), groupBy: (category)
+   ```
+
+2. **Optimize WHERE filters** - Reduce data fetched for manual aggregation
+   ```url
+   ✅ ?where=createdAt: gte(2025-01-01)&aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
+   ```
+
+3. **Add database indexes** - Helps with data retrieval
+   ```prisma
+   @@index([marketingMasterCategoryId])
+   @@index([warehouseId])
+   ```
+
+4. **Consider pagination** - For very large datasets
+   ```typescript
+   // Add pagination support to reduce memory usage
+   const data = await this.prisma.product.findMany({
+     where: filter,
+     include: buildIncludeForRelationships(aggregate.groupBy),
+     take: 10000, // Limit records
+   });
+   ```
+
+5. **Cache results** - For frequently accessed aggregations
+   ```typescript
+   @Cacheable({ ttl: 3600 }) // Cache for 1 hour
+   async stat(filter?: Pipes.Where, aggregate?: Pipes.Aggregate) {
+     return AggregatePipe.execute(this.prisma.product, aggregate, filter)
+       .then(data => AggregatePipe.toChartSeries(data, aggregate));
+   }
+   ```
+
+##### Advantages of Manual Aggregation
+
+**✅ Simplicity**
+- No raw SQL to write or maintain
+- No complex query builders
+- Just fetch and process
+
+**✅ Flexibility**
+- Works with any Prisma model
+- Supports complex nested relationships
+- Easy to extend with custom logic
+
+**✅ Type Safety**
+- Full TypeScript support
+- Prisma's type inference works
+- No type casting needed
+
+**✅ Maintainability**
+- Uses standard Prisma APIs
+- Easy to understand and debug
+- No database-specific code
+
+##### Limitations & Notes
+
+1. **Memory Usage**: Loads all filtered records into memory before grouping
+   - ⚠️ Be cautious with large datasets (>100K records)
+   - ✅ Use WHERE filters to reduce data volume
+   - ✅ Consider pagination for very large results
+
+2. **Performance**: Slower than database-level groupBy
+   - 🔸 Acceptable for most use cases (<10K records)
+   - ⚠️ May be slow for millions of records
+   - ✅ Use caching for frequently accessed data
+
+3. **Nested Relations**: Currently supports one level deep
+   - ✅ `category.name` works
+   - ✅ `warehouse.region` works
+   - ⚠️ `order.customer.company.name` may need extension
+
+4. **Aggregate Functions**: All standard functions supported
+   - ✅ sum, avg, min, max, count
+   - ✅ Works with numeric and date fields
+   - ✅ Handles null values properly
+
+##### Troubleshooting
+
+**Issue 1: Out of Memory Error**
+```typescript
+// Problem: Too many records loaded
+// Solution: Add pagination or stricter filters
+?where=createdAt: gte(2025-01-01)&aggregate=qty: sum(), groupBy: (category)
+```
+
+**Issue 2: Slow Performance**
+```typescript
+// Problem: Large dataset with manual aggregation
+// Solution: Use Prisma groupBy for simple fields
+// Instead of: groupBy: (marketingMasterCategory.category)
+// Use: Add category field directly to Product model
+?aggregate=qty: sum(), groupBy: (category) // Much faster
+```
+
+**Issue 3: Relationship Not Found**
+```typescript
+// Problem: Relation not defined in Prisma schema
+// Solution: Ensure relationship exists in schema
+model Product {
+  marketingMasterCategory MarketingMasterCategory @relation(...)
+  //                      ^^^^^^^^^^^^^^^^^^^^^^^ Must match field name
+}
+```
+
+**Issue 4: Incorrect Results**
+```typescript
+// Problem: Null values causing issues
+// Solution: Manual aggregation handles nulls properly
+// Filter in WHERE clause if needed
+?where=marketingMasterCategoryId: not(null)&aggregate=...
+```
+
+##### When to Use Manual Aggregation vs Prisma groupBy
+
+**Use Prisma groupBy (Standard) when:**
+- ✅ Grouping by direct model fields
+- ✅ Working with large datasets (>100K records)
+- ✅ Performance is critical
+- ✅ No relationships needed
+
+**Use Manual Aggregation when:**
+- ✅ Grouping by relationship fields
+- ✅ Dataset is manageable (<100K records)
+- ✅ Flexibility is more important than speed
+- ✅ Complex nested relationships needed
+
+**Example Decision Tree:**
+```
+Need to group by relationship field?
+├─ Yes → Use Manual Aggregation
+│         Dataset size?
+│         ├─ < 10K records → ✅ Perfect use case
+│         ├─ 10K-100K records → ✅ Good, add caching
+│         └─ > 100K records → ⚠️ Consider denormalization
+│
+└─ No → Use Prisma groupBy (Standard)
+         └─ ✅ Fastest option
 ```
 
 ---
 
-## 📄 License
+### [2.4.2] - 2025
 
-MIT
+#### 🚀 Enhanced - Grouped Time Series Support
 
----
+Added support for combining time series with categorical grouping, enabling multi-series time-based charts.
 
-**✨ v2.4.5 makes table mapping effortless - works with any Prisma schema!**
-
-Made with ❤️ by [dwcahyo](https://github.com/dwcahyo23)
-
-[↑ Back to top](#-dwcahyonestjs-prisma-pipes)
+**Features:**
+- Group time series data by additional categorical fields
+- Automatic series generation for each group
+- Stacked time series charts
+- Compatible

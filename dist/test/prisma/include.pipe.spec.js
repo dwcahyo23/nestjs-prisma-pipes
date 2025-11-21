@@ -56,5 +56,52 @@ describe('IncludeTransformPipe', () => {
             },
         });
     });
+    it('should parse multi-nested selects and includes', () => {
+        const result = pipe.transform('posts.comments,profile.select:(id,firstName,account.select:(password,email))');
+        expect(result).toEqual({
+            posts: {
+                include: {
+                    comments: true,
+                },
+            },
+            profile: {
+                select: {
+                    id: true,
+                    firstName: true,
+                    account: {
+                        select: {
+                            password: true,
+                            email: true,
+                        },
+                    },
+                },
+            },
+        });
+    });
+    it('should parse deep nested includes with selects', () => {
+        const result = pipe.transform('company.departments.select:(name,employees.select:(id,name,manager.select:(id)))');
+        expect(result).toEqual({
+            company: {
+                include: {
+                    departments: {
+                        select: {
+                            name: true,
+                            employees: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    manager: {
+                                        select: {
+                                            id: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    });
 });
 //# sourceMappingURL=include.pipe.spec.js.map
