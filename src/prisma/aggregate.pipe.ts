@@ -383,6 +383,108 @@ function detectDateFieldType(value: any): 'date' | 'year' | 'month' | 'day' | 'u
 }
 
 /**
+ * Extract year range from actual data
+ */
+function extractYearRangeFromData(
+	dataArray: any[],
+	dateField: string,
+	interval: Pipes.TimeInterval
+): { minYear: number; maxYear: number } | null {
+	if (!dataArray || dataArray.length === 0) return null;
+
+	const years: number[] = [];
+
+	for (const item of dataArray) {
+		const value = getNestedValue(item, dateField);
+		if (!value) continue;
+
+		const str = String(value).trim();
+		let year: number | null = null;
+
+		// Direct year string
+		if (/^\d{4}$/.test(str)) {
+			year = parseInt(str, 10);
+		}
+		// Try parse as date
+		else {
+			try {
+				const date = new Date(str);
+				if (!isNaN(date.getTime())) {
+					year = date.getUTCFullYear();
+				}
+			} catch { }
+		}
+
+		if (year && year >= 1900 && year <= 2100) {
+			years.push(year);
+		}
+	}
+
+	if (years.length === 0) return null;
+
+	return {
+		minYear: Math.min(...years),
+		maxYear: Math.max(...years)
+	};
+}
+
+/**
+ * Generate time series labels - FIXED untuk year interval
+ */
+function generateTimeSeriesLabelsEnhanced(
+	interval: Pipes.TimeInterval,
+	yearRange?: { minYear: number; maxYear: number }
+): string[] {
+	const labels: string[] = [];
+	const currentYear = new Date().getFullYear();
+
+	switch (interval) {
+		case 'day': {
+			const year = yearRange?.minYear || currentYear;
+			for (let m = 0; m < 12; m++) {
+				const daysInMonth = new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
+				for (let d = 1; d <= daysInMonth; d++) {
+					const month = String(m + 1).padStart(2, '0');
+					const day = String(d).padStart(2, '0');
+					labels.push(`${year}-${month}-${day}`);
+				}
+			}
+			break;
+		}
+
+		case 'month': {
+			const year = yearRange?.minYear || currentYear;
+			for (let i = 0; i < 12; i++) {
+				const date = new Date(Date.UTC(year, i, 1));
+				labels.push(date.toLocaleString('en-US', {
+					month: 'short',
+					year: 'numeric',
+					timeZone: 'UTC'
+				}));
+			}
+			break;
+		}
+
+		case 'year': {
+			// FIXED: Generate dari minYear sampai maxYear dari data aktual
+			if (yearRange) {
+				for (let y = yearRange.minYear; y <= yearRange.maxYear; y++) {
+					labels.push(y.toString());
+				}
+			} else {
+				// Fallback: 5 tahun terakhir jika tidak ada data
+				for (let i = 4; i >= 0; i--) {
+					labels.push((currentYear - i).toString());
+				}
+			}
+			break;
+		}
+	}
+
+	return labels;
+}
+
+/**
  * Parse string value to standardized format based on interval
  */
 function parseStringToTimeKey(
@@ -518,41 +620,37 @@ function transformToChartSeries(
 ): Pipes.ChartSeries {
 	const dataArray = Array.isArray(data) ? data : [];
 
-	// ... (empty data handling sama seperti sebelumnya)
+	// Empty data handling
+	if (!dataArray || dataArray.length === 0) {
+		const series = aggregates.map(agg => ({
+			name: `${agg.function}(${agg.field})`,
+			data: [0],
+		}));
+
+		return {
+			categories: ['Total'],
+			series,
+			chartType: chartConfig?.type,
+			stacked: chartConfig?.stacked,
+			horizontal: chartConfig?.horizontal,
+			raw: [],
+		};
+	}
 
 	// TIME SERIES CHART - ENHANCED
 	if (chartConfig?.dateField && chartConfig?.interval) {
 		const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
 		const hasGrouping = nonDateGroupFields.length > 0;
 
-		// Detect format dari data
-		let year: number | undefined;
-		let detectedFormat: 'date' | 'year' | 'month' | 'day' | 'unknown' = 'unknown';
+		// Extract year range dari data aktual
+		const yearRange = extractYearRangeFromData(
+			dataArray,
+			chartConfig.dateField,
+			chartConfig.interval
+		);
 
-		try {
-			const sampleValues = dataArray
-				.map(item => getNestedValue(item, chartConfig.dateField!))
-				.filter(Boolean);
-
-			if (sampleValues.length > 0) {
-				detectedFormat = detectDateFieldType(sampleValues[0]);
-
-				// Extract year for label generation
-				if (detectedFormat === 'date') {
-					const dates = sampleValues.map((d: any) => new Date(d));
-					year = Math.min(...dates.map(d => d.getUTCFullYear()));
-				} else if (detectedFormat === 'year') {
-					const years = sampleValues.map((y: any) => parseInt(String(y), 10));
-					year = Math.min(...years.filter(y => !isNaN(y)));
-				} else {
-					year = new Date().getFullYear();
-				}
-			}
-		} catch {
-			year = new Date().getFullYear();
-		}
-
-		const timeLabels = generateTimeSeriesLabels(chartConfig.interval, year);
+		// Generate labels berdasarkan data aktual
+		const timeLabels = generateTimeSeriesLabelsEnhanced(chartConfig.interval, yearRange || undefined);
 
 		// GROUPED TIME SERIES
 		if (hasGrouping) {
@@ -564,11 +662,10 @@ function transformToChartSeries(
 				const groupValue = String(getNestedValue(item, groupField) ?? 'null');
 
 				if (dateValue) {
-					// Use enhanced key generation
 					const timeKey = getTimeKeyEnhanced(
 						dateValue,
 						chartConfig.interval!,
-						year
+						yearRange?.minYear
 					);
 
 					if (!groupedDataMap.has(groupValue)) {
@@ -583,7 +680,6 @@ function transformToChartSeries(
 				}
 			});
 
-			// ... (sisanya sama seperti sebelumnya)
 			const series: Array<{ name: string; data: number[] }> = [];
 
 			groupedDataMap.forEach((timeMap, groupValue) => {
@@ -630,11 +726,10 @@ function transformToChartSeries(
 		dataArray.forEach(item => {
 			const dateValue = getNestedValue(item, chartConfig.dateField!);
 			if (dateValue) {
-				// Use enhanced key generation
 				const key = getTimeKeyEnhanced(
 					dateValue,
 					chartConfig.interval!,
-					year
+					yearRange?.minYear
 				);
 				if (!dataMap.has(key)) {
 					dataMap.set(key, []);
@@ -679,7 +774,7 @@ function transformToChartSeries(
 		};
 	}
 
-	// Grouped (non-time-series) chart
+	// GROUPED (non-time-series) CHART
 	if (groupBy && groupBy.length > 0) {
 		const categoryField = chartConfig?.groupField || groupBy[0];
 
@@ -715,7 +810,7 @@ function transformToChartSeries(
 		};
 	}
 
-	// Regular chart (no grouping)
+	// REGULAR CHART (no grouping)
 	const categories = dataArray.map((_, idx) => `Category ${idx + 1}`);
 
 	const series = aggregates.map((agg: Pipes.AggregateSpec) => {
