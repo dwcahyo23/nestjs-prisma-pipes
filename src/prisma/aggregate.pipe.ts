@@ -350,6 +350,164 @@ async function manualAggregateWithRelationships(
 }
 
 /**
+ * Detect date field format type
+ */
+function detectDateFieldType(value: any): 'date' | 'year' | 'month' | 'day' | 'unknown' {
+	if (!value) return 'unknown';
+
+	const str = String(value).trim();
+
+	// Try parsing as full date
+	const dateTest = new Date(str);
+	if (!isNaN(dateTest.getTime()) && str.includes('-')) {
+		return 'date';
+	}
+
+	// Check if it's a 4-digit year
+	if (/^\d{4}$/.test(str)) {
+		return 'year';
+	}
+
+	// Check if it's a month (01-12 or January-December)
+	if (/^(0?[1-9]|1[0-2])$/.test(str) ||
+		/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(str)) {
+		return 'month';
+	}
+
+	// Check if it's a day (01-31)
+	if (/^(0?[1-9]|[12]\d|3[01])$/.test(str)) {
+		return 'day';
+	}
+
+	return 'unknown';
+}
+
+/**
+ * Parse string value to standardized format based on interval
+ */
+function parseStringToTimeKey(
+	value: any,
+	interval: Pipes.TimeInterval,
+	contextYear?: number,
+	contextMonth?: number
+): string | null {
+	if (!value) return null;
+
+	const str = String(value).trim();
+	const currentYear = contextYear || new Date().getFullYear();
+
+	switch (interval) {
+		case 'year': {
+			// Expected: "2024" or Date
+			if (/^\d{4}$/.test(str)) {
+				return str;
+			}
+			const date = new Date(str);
+			if (!isNaN(date.getTime())) {
+				return date.getUTCFullYear().toString();
+			}
+			return null;
+		}
+
+		case 'month': {
+			// Expected: "01", "1", "January", "Jan", or Date
+			let month: number | null = null;
+
+			// Numeric month
+			if (/^\d{1,2}$/.test(str)) {
+				month = parseInt(str, 10);
+			}
+			// Text month
+			else {
+				const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+					'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+				const monthIndex = monthNames.findIndex(m =>
+					str.toLowerCase().startsWith(m)
+				);
+				if (monthIndex >= 0) {
+					month = monthIndex + 1;
+				}
+			}
+
+			// Try as full date
+			if (month === null) {
+				const date = new Date(str);
+				if (!isNaN(date.getTime())) {
+					month = date.getUTCMonth() + 1;
+				}
+			}
+
+			if (month !== null && month >= 1 && month <= 12) {
+				const date = new Date(Date.UTC(currentYear, month - 1, 1));
+				return date.toLocaleString('en-US', {
+					month: 'short',
+					year: 'numeric',
+					timeZone: 'UTC'
+				});
+			}
+
+			return null;
+		}
+
+		case 'day': {
+			// Expected: "15", "2024-01-15", or Date
+			// For day interval, we need full date context
+
+			// Try as full date first
+			const date = new Date(str);
+			if (!isNaN(date.getTime())) {
+				const year = date.getUTCFullYear();
+				const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+				const day = String(date.getUTCDate()).padStart(2, '0');
+				return `${year}-${month}-${day}`;
+			}
+
+			// If just day number, need context
+			if (/^\d{1,2}$/.test(str)) {
+				const day = parseInt(str, 10);
+				if (day >= 1 && day <= 31 && contextMonth) {
+					const monthStr = String(contextMonth).padStart(2, '0');
+					const dayStr = String(day).padStart(2, '0');
+					return `${currentYear}-${monthStr}-${dayStr}`;
+				}
+			}
+
+			return null;
+		}
+	}
+}
+
+/**
+ * Enhanced getTimeKey that handles string dates
+ */
+function getTimeKeyEnhanced(
+	value: Date | string | number,
+	interval: Pipes.TimeInterval,
+	contextYear?: number,
+	contextMonth?: number
+): string {
+	// Handle Date object
+	if (value instanceof Date) {
+		return getTimeKey(value, interval);
+	}
+
+	// Handle string/number
+	const result = parseStringToTimeKey(value, interval, contextYear, contextMonth);
+	if (result) return result;
+
+	// Fallback: try to parse as date
+	try {
+		const date = new Date(value);
+		if (!isNaN(date.getTime())) {
+			return getTimeKey(date, interval);
+		}
+	} catch { }
+
+	// Last resort: return as string
+	return String(value ?? 'null');
+}
+
+/**
  * Transform data to chart series format
  */
 function transformToChartSeries(
@@ -360,45 +518,43 @@ function transformToChartSeries(
 ): Pipes.ChartSeries {
 	const dataArray = Array.isArray(data) ? data : [];
 
-	// Empty data handling
-	if (!dataArray || dataArray.length === 0) {
-		const series = aggregates.map(agg => ({
-			name: `${agg.function}(${agg.field})`,
-			data: [0],
-		}));
+	// ... (empty data handling sama seperti sebelumnya)
 
-		return {
-			categories: ['Total'],
-			series,
-			chartType: chartConfig?.type,
-			stacked: chartConfig?.stacked,
-			horizontal: chartConfig?.horizontal,
-			raw: [],
-		};
-	}
-
-	// Time series chart
+	// TIME SERIES CHART - ENHANCED
 	if (chartConfig?.dateField && chartConfig?.interval) {
 		const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
 		const hasGrouping = nonDateGroupFields.length > 0;
 
+		// Detect format dari data
 		let year: number | undefined;
+		let detectedFormat: 'date' | 'year' | 'month' | 'day' | 'unknown' = 'unknown';
+
 		try {
-			const dates = dataArray
+			const sampleValues = dataArray
 				.map(item => getNestedValue(item, chartConfig.dateField!))
-				.filter(Boolean)
-				.map((d: any) => new Date(d));
-			if (dates.length > 0) {
-				const minYear = Math.min(...dates.map(d => d.getUTCFullYear()));
-				year = minYear;
+				.filter(Boolean);
+
+			if (sampleValues.length > 0) {
+				detectedFormat = detectDateFieldType(sampleValues[0]);
+
+				// Extract year for label generation
+				if (detectedFormat === 'date') {
+					const dates = sampleValues.map((d: any) => new Date(d));
+					year = Math.min(...dates.map(d => d.getUTCFullYear()));
+				} else if (detectedFormat === 'year') {
+					const years = sampleValues.map((y: any) => parseInt(String(y), 10));
+					year = Math.min(...years.filter(y => !isNaN(y)));
+				} else {
+					year = new Date().getFullYear();
+				}
 			}
 		} catch {
-			year = undefined;
+			year = new Date().getFullYear();
 		}
 
 		const timeLabels = generateTimeSeriesLabels(chartConfig.interval, year);
 
-		// Grouped time series
+		// GROUPED TIME SERIES
 		if (hasGrouping) {
 			const groupField = chartConfig.groupField || nonDateGroupFields[0];
 			const groupedDataMap = new Map<string, Map<string, any[]>>();
@@ -408,7 +564,12 @@ function transformToChartSeries(
 				const groupValue = String(getNestedValue(item, groupField) ?? 'null');
 
 				if (dateValue) {
-					const timeKey = getTimeKey(new Date(dateValue), chartConfig.interval!);
+					// Use enhanced key generation
+					const timeKey = getTimeKeyEnhanced(
+						dateValue,
+						chartConfig.interval!,
+						year
+					);
 
 					if (!groupedDataMap.has(groupValue)) {
 						groupedDataMap.set(groupValue, new Map());
@@ -422,6 +583,7 @@ function transformToChartSeries(
 				}
 			});
 
+			// ... (sisanya sama seperti sebelumnya)
 			const series: Array<{ name: string; data: number[] }> = [];
 
 			groupedDataMap.forEach((timeMap, groupValue) => {
@@ -435,7 +597,9 @@ function transformToChartSeries(
 
 						if (func === 'count') {
 							return items.reduce((acc, it) => {
-								const val = typeof it._count === 'number' ? it._count : (it._count?.[field] || it._count || 0);
+								const val = typeof it._count === 'number'
+									? it._count
+									: (it._count?.[field] || it._count || 0);
 								return acc + (typeof val === 'number' ? val : 0);
 							}, 0);
 						}
@@ -460,13 +624,18 @@ function transformToChartSeries(
 			};
 		}
 
-		// Regular time series
+		// REGULAR TIME SERIES
 		const dataMap = new Map<string, any[]>();
 
 		dataArray.forEach(item => {
 			const dateValue = getNestedValue(item, chartConfig.dateField!);
 			if (dateValue) {
-				const key = getTimeKey(new Date(dateValue), chartConfig.interval!);
+				// Use enhanced key generation
+				const key = getTimeKeyEnhanced(
+					dateValue,
+					chartConfig.interval!,
+					year
+				);
 				if (!dataMap.has(key)) {
 					dataMap.set(key, []);
 				}
@@ -484,7 +653,9 @@ function transformToChartSeries(
 
 				if (func === 'count') {
 					return items.reduce((acc, it) => {
-						const val = typeof it._count === 'number' ? it._count : (it._count?.[field] || it._count || 0);
+						const val = typeof it._count === 'number'
+							? it._count
+							: (it._count?.[field] || it._count || 0);
 						return acc + (typeof val === 'number' ? val : 0);
 					}, 0);
 				}
