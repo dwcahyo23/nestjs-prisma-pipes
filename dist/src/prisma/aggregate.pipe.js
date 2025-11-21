@@ -162,22 +162,45 @@ function buildPrismaAggregate(aggregates) {
     }
     return aggregateObj;
 }
-function buildIncludeForRelationships(groupBy) {
-    const include = {};
+function buildSelectForFields(groupBy, aggregates) {
+    const select = {};
     for (const field of groupBy) {
-        if (field.includes('.')) {
-            const { relation } = parseRelationshipPath(field);
-            const parts = relation.split('.');
-            let current = include;
-            for (let i = 0; i < parts.length; i++) {
-                const part = parts[i];
-                if (i === parts.length - 1) {
-                    current[part] = true;
+        if (!field.includes('.')) {
+            select[field] = true;
+        }
+    }
+    for (const agg of aggregates) {
+        if (!agg.field.includes('.')) {
+            select[agg.field] = true;
+        }
+    }
+    return select;
+}
+function buildIncludeForRelationships(groupBy, aggregates) {
+    const include = {};
+    const relationPaths = [
+        ...groupBy.filter(f => f.includes('.')),
+        ...aggregates.filter(agg => agg.field.includes('.')).map(agg => agg.field)
+    ];
+    for (const path of relationPaths) {
+        const { relation, field } = parseRelationshipPath(path);
+        const parts = relation.split('.');
+        let current = include;
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            if (i === parts.length - 1) {
+                if (!current[part]) {
+                    current[part] = { select: {} };
                 }
-                else {
-                    if (!current[part]) {
-                        current[part] = { include: {} };
-                    }
+                if (typeof current[part] === 'object' && 'select' in current[part]) {
+                    current[part].select[field] = true;
+                }
+            }
+            else {
+                if (!current[part]) {
+                    current[part] = { include: {} };
+                }
+                if (typeof current[part] === 'object' && 'include' in current[part]) {
                     current = current[part].include;
                 }
             }
@@ -186,11 +209,23 @@ function buildIncludeForRelationships(groupBy) {
     return include;
 }
 async function manualAggregateWithRelationships(prismaModel, aggregates, groupBy, where) {
-    const include = buildIncludeForRelationships(groupBy);
-    const allData = await prismaModel.findMany({
-        where,
-        include: Object.keys(include).length > 0 ? include : undefined,
-    });
+    const scalarSelect = buildSelectForFields(groupBy, aggregates);
+    const relationInclude = buildIncludeForRelationships(groupBy, aggregates);
+    const queryOptions = { where };
+    if (Object.keys(scalarSelect).length > 0) {
+        queryOptions.select = { ...scalarSelect };
+    }
+    if (Object.keys(relationInclude).length > 0) {
+        if (queryOptions.select) {
+            Object.keys(relationInclude).forEach(key => {
+                queryOptions.select[key] = relationInclude[key];
+            });
+        }
+        else {
+            queryOptions.include = relationInclude;
+        }
+    }
+    const allData = await prismaModel.findMany(queryOptions);
     const groups = new Map();
     for (const item of allData) {
         const groupKey = groupBy.map(field => {

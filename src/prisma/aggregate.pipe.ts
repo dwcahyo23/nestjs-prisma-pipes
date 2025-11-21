@@ -218,30 +218,71 @@ function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string,
 }
 
 /**
- * Build include object for fetching related data
+ * Build select object for scalar fields
+ */
+function buildSelectForFields(
+	groupBy: string[],
+	aggregates: Pipes.AggregateSpec[]
+): Record<string, any> {
+	const select: Record<string, any> = {};
+
+	// Add scalar fields from groupBy
+	for (const field of groupBy) {
+		if (!field.includes('.')) {
+			select[field] = true;
+		}
+	}
+
+	// Add scalar fields from aggregates
+	for (const agg of aggregates) {
+		if (!agg.field.includes('.')) {
+			select[agg.field] = true;
+		}
+	}
+
+	return select;
+}
+
+/**
+ * Build include object for fetching related data with selective fields
  * This is the KEY for handling relationships in aggregation
  */
-function buildIncludeForRelationships(groupBy: string[]): Record<string, any> {
+function buildIncludeForRelationships(
+	groupBy: string[],
+	aggregates: Pipes.AggregateSpec[]
+): Record<string, any> {
 	const include: Record<string, any> = {};
 
-	for (const field of groupBy) {
-		if (field.includes('.')) {
-			const { relation } = parseRelationshipPath(field);
+	// Collect all relationship paths from groupBy and aggregates
+	const relationPaths = [
+		...groupBy.filter(f => f.includes('.')),
+		...aggregates.filter(agg => agg.field.includes('.')).map(agg => agg.field)
+	];
 
-			// Build nested include structure
-			const parts = relation.split('.');
-			let current = include;
+	for (const path of relationPaths) {
+		const { relation, field } = parseRelationshipPath(path);
 
-			for (let i = 0; i < parts.length; i++) {
-				const part = parts[i];
-				if (i === parts.length - 1) {
-					// Last part - just include it
-					current[part] = true;
-				} else {
-					// Nested relation
-					if (!current[part]) {
-						current[part] = { include: {} };
-					}
+		// Build nested include structure with select
+		const parts = relation.split('.');
+		let current = include;
+
+		for (let i = 0; i < parts.length; i++) {
+			const part = parts[i];
+
+			if (i === parts.length - 1) {
+				// Last part - include with select for specific field
+				if (!current[part]) {
+					current[part] = { select: {} };
+				}
+				if (typeof current[part] === 'object' && 'select' in current[part]) {
+					current[part].select[field] = true;
+				}
+			} else {
+				// Nested relation
+				if (!current[part]) {
+					current[part] = { include: {} };
+				}
+				if (typeof current[part] === 'object' && 'include' in current[part]) {
 					current = current[part].include;
 				}
 			}
@@ -261,13 +302,30 @@ async function manualAggregateWithRelationships(
 	groupBy: string[],
 	where?: any
 ): Promise<any[]> {
-	// Step 1: Fetch all data with relationships included
-	const include = buildIncludeForRelationships(groupBy);
+	// Step 1: Build optimized select and include
+	const scalarSelect = buildSelectForFields(groupBy, aggregates);
+	const relationInclude = buildIncludeForRelationships(groupBy, aggregates);
 
-	const allData = await prismaModel.findMany({
-		where,
-		include: Object.keys(include).length > 0 ? include : undefined,
-	});
+	// Merge select and include
+	const queryOptions: any = { where };
+
+	if (Object.keys(scalarSelect).length > 0) {
+		queryOptions.select = { ...scalarSelect };
+	}
+
+	if (Object.keys(relationInclude).length > 0) {
+		if (queryOptions.select) {
+			// If we have select, we need to merge include into it
+			Object.keys(relationInclude).forEach(key => {
+				queryOptions.select[key] = relationInclude[key];
+			});
+		} else {
+			queryOptions.include = relationInclude;
+		}
+	}
+
+	// Fetch data with optimized query
+	const allData = await prismaModel.findMany(queryOptions);
 
 	// Step 2: Group data manually
 	const groups = new Map<string, any[]>();
