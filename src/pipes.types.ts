@@ -1,5 +1,49 @@
 export namespace Pipes {
 	// ============================================
+	// MAPPING PROVIDER TYPES
+	// ============================================
+
+	/**
+	 * Table/Field mapping provider interface
+	 * Main program should implement this to provide Prisma DMMF mappings
+	 */
+	export interface MappingProvider {
+		/**
+		 * Get database table name from model name
+		 * @example getTableName('MarketingMasterCategory') => 'market_master_category'
+		 */
+		getTableName(modelName: string): string;
+
+		/**
+		 * Get database column name from model field name
+		 * @example getColumnName('MarketingMasterCategory', 'category') => 'category'
+		 */
+		getColumnName(modelName: string, fieldName: string): string;
+
+		/**
+		 * Get primary key field(s) for a model
+		 * Supports both single (@id) and composite (@@id) primary keys
+		 * @param modelName - Prisma model name
+		 * @returns Array of primary key column name(s)
+		 * @example getPrimaryKey('Product') => ['id']
+		 * @example getPrimaryKey('Product') => ['companyId', 'productId'] // composite
+		 */
+		getPrimaryKey(modelName: string): string[];
+
+		/**
+		 * Get foreign key column(s) for a relation
+		 * Supports both single and composite foreign keys
+		 * @param modelName - Prisma model name
+		 * @param relationName - Relation field name
+		 * @returns Array of foreign key column name(s)
+		 * @example getForeignKey('Product', 'category') => ['categoryId']
+		 * @example getForeignKey('Product', 'category') => ['companyId', 'categoryId'] // composite
+		 */
+		getForeignKey(modelName: string, relationName: string): string[];
+	}
+
+
+	// ============================================
 	// WHERE PIPE TYPES
 	// ============================================
 

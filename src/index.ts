@@ -7,6 +7,9 @@ import { Pipes } from './pipes.types';
 import AggregatePipe from './prisma/aggregate.pipe';
 
 
+// Export types
+export type MappingProvider = Pipes.MappingProvider;
+
 export {
 	WherePipe,
 	OrderByPipe,

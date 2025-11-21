@@ -9,9 +9,28 @@ const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'] as const;
 type AggregateFunction = typeof AGGREGATE_FUNCTIONS[number];
 
 /**
+ * Default mapping provider (identity mapping - no transformation)
+ */
+class DefaultMappingProvider implements Pipes.MappingProvider {
+	getTableName(modelName: string): string {
+		return modelName;
+	}
+
+	getColumnName(modelName: string, fieldName: string): string {
+		return fieldName;
+	}
+
+	getPrimaryKey(modelName: string): string[] {
+		return ['id']; // Default assumption
+	}
+
+	getForeignKey(modelName: string, relationName: string): string[] {
+		return [`${relationName}Id`]; // Default convention
+	}
+}
+
+/**
  * Parse aggregate function with parameters
- * @example "sum()" -> { function: 'sum', params: [] }
- * @example "count(id)" -> { function: 'count', params: ['id'] }
  */
 function parseAggregateFunction(value: string): {
 	function: AggregateFunction;
@@ -35,11 +54,6 @@ function parseAggregateFunction(value: string): {
 
 /**
  * Parse groupBy configuration
- * Handles format: "(category)" or "(category, region)"
- * 
- * @example "(category)" -> ['category']
- * @example "(category, region)" -> ['category', 'region']
- * @example "(marketingMasterCategory.category)" -> ['marketingMasterCategory.category']
  */
 function parseGroupBy(value: string): string[] | null {
 	if (!value || typeof value !== 'string') return null;
@@ -51,7 +65,7 @@ function parseGroupBy(value: string): string[] | null {
 		return null;
 	}
 
-	const fields = trimmed.slice(1, -1); // Remove ( and )
+	const fields = trimmed.slice(1, -1);
 	if (!fields.trim()) return null;
 
 	return fields.split(',').map(f => f.trim()).filter(Boolean);
@@ -66,8 +80,6 @@ function hasRelationshipInGroupBy(groupBy: string[]): boolean {
 
 /**
  * Parse relationship path into table and field
- * @example "marketingMasterCategory.category" -> { relation: "marketingMasterCategory", field: "category" }
- * @example "warehouse.region.name" -> { relation: "warehouse.region", field: "name" }
  */
 function parseRelationshipPath(path: string): { relation: string; field: string } {
 	const parts = path.split('.');
@@ -77,29 +89,64 @@ function parseRelationshipPath(path: string): { relation: string; field: string 
 }
 
 /**
- * Build SQL field expression for relationship
- * @example "marketingMasterCategory.category" -> "marketingMasterCategory.category"
+ * Map model relationship path to database table path
+ * @example "marketingMasterCategory.category" -> "market_master_category.category"
  */
-function buildSqlFieldPath(path: string, tableAlias: string = 'main'): string {
-	if (!path.includes('.')) {
-		return `${tableAlias}.${path}`;
+function mapRelationshipPath(
+	path: string,
+	mainModelName: string,
+	mappingProvider: Pipes.MappingProvider,
+	explicitMapping?: Map<string, string>
+): string {
+	// Check explicit mapping first
+	if (explicitMapping?.has(path)) {
+		return explicitMapping.get(path)!;
 	}
 
-	// For nested relationships, we'll use the last segment
+	// If no dots, it's a simple field on main model
+	if (!path.includes('.')) {
+		return mappingProvider.getColumnName(mainModelName, path);
+	}
+
 	const parts = path.split('.');
-	const relationAlias = parts.slice(0, -1).join('_');
-	const field = parts[parts.length - 1];
-	return `${relationAlias}.${field}`;
+	const field = parts.pop()!;
+	const relationPath = parts.join('.');
+
+	// Check if there's explicit mapping for the relation part
+	if (explicitMapping?.has(relationPath)) {
+		const mappedRelation = explicitMapping.get(relationPath)!;
+		return `${mappedRelation}.${field}`;
+	}
+
+	// Auto-map using provider: Get the last relation name and map it
+	const relationName = parts[parts.length - 1];
+	const tableName = mappingProvider.getTableName(relationName);
+	const columnName = mappingProvider.getColumnName(relationName, field);
+
+	return `${tableName}.${columnName}`;
 }
 
 /**
- * Parse chart configuration with advanced options
- * @example "bar" -> { type: 'bar' }
- * @example "bar(category)" -> { type: 'bar', groupField: 'category' }
- * @example "bar(marketingMasterCategory.category)" -> { type: 'bar', groupField: 'marketingMasterCategory.category' }
- * @example "line(createdAt, month)" -> { type: 'line', dateField: 'createdAt', interval: 'month' }
- * @example "pie(category, stacked)" -> { type: 'pie', groupField: 'category', stacked: true }
- * @example "bar(category, horizontal)" -> { type: 'bar', groupField: 'category', horizontal: true }
+ * Build SQL field expression for relationship
+ */
+function buildSqlFieldPath(
+	path: string,
+	mainModelName: string,
+	mappingProvider: Pipes.MappingProvider,
+	tableAlias: string = 'main',
+	explicitMapping?: Map<string, string>
+): string {
+	if (!path.includes('.')) {
+		const columnName = mappingProvider.getColumnName(mainModelName, path);
+		return `${tableAlias}.${columnName}`;
+	}
+
+	const mappedPath = mapRelationshipPath(path, mainModelName, mappingProvider, explicitMapping);
+	return mappedPath;
+}
+
+/**
+ * Parse chart configuration
  */
 function parseChartConfig(value: string): {
 	type: Pipes.ChartType;
@@ -113,12 +160,10 @@ function parseChartConfig(value: string): {
 
 	const chartTypes: Pipes.ChartType[] = ['bar', 'line', 'pie', 'area', 'donut'];
 
-	// Simple chart type without parameters
 	if (chartTypes.includes(value.toLowerCase() as Pipes.ChartType)) {
 		return { type: value.toLowerCase() as Pipes.ChartType };
 	}
 
-	// Chart with parameters: bar(field) or bar(field, option)
 	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^)]+))?\)$/i.exec(value.trim());
 
 	if (!match) return null;
@@ -126,7 +171,6 @@ function parseChartConfig(value: string): {
 	const [, type, firstParam, secondParam] = match;
 	const chartType = type.toLowerCase() as Pipes.ChartType;
 
-	// Check if first parameter is a time interval (time series chart)
 	const timeIntervals = ['day', 'month', 'year'];
 	if (timeIntervals.includes(secondParam?.toLowerCase())) {
 		return {
@@ -136,7 +180,6 @@ function parseChartConfig(value: string): {
 		};
 	}
 
-	// Check for chart options (stacked, horizontal, etc.)
 	const options: any = { type: chartType, groupField: firstParam.trim() };
 
 	if (secondParam) {
@@ -146,7 +189,6 @@ function parseChartConfig(value: string): {
 		} else if (option === 'horizontal') {
 			options.horizontal = true;
 		} else if (timeIntervals.includes(option)) {
-			// If second param is interval, first param is dateField
 			options.dateField = firstParam.trim();
 			options.interval = option as Pipes.TimeInterval;
 			delete options.groupField;
@@ -165,7 +207,6 @@ function generateTimeSeriesLabels(interval: Pipes.TimeInterval, year?: number): 
 
 	switch (interval) {
 		case 'day':
-			// Generate all days in a year: YYYY-MM-DD
 			for (let m = 0; m < 12; m++) {
 				const daysInMonth = new Date(Date.UTC(currentYear, m + 1, 0)).getUTCDate();
 				for (let d = 1; d <= daysInMonth; d++) {
@@ -182,7 +223,6 @@ function generateTimeSeriesLabels(interval: Pipes.TimeInterval, year?: number): 
 			}
 			break;
 		case 'year':
-			// Last 5 years
 			for (let i = 4; i >= 0; i--) {
 				labels.push((currentYear - i).toString());
 			}
@@ -193,7 +233,7 @@ function generateTimeSeriesLabels(interval: Pipes.TimeInterval, year?: number): 
 }
 
 /**
- * Get time key from date - normalize dates to match label format
+ * Get time key from date
  */
 function getTimeKey(date: Date | string, interval: Pipes.TimeInterval): string {
 	const d = date instanceof Date ? date : new Date(date);
@@ -257,18 +297,20 @@ function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string,
 
 /**
  * Build raw SQL query for aggregation with relationships
- * @param tableName - Main table name (e.g., "Product")
- * @param aggregates - Aggregate specifications
- * @param groupBy - GroupBy fields (may contain relationships)
- * @param whereClause - Optional WHERE conditions
  */
 function buildRawSqlQuery(
 	tableName: string,
+	mainModelName: string,
+	mappingProvider: Pipes.MappingProvider,
 	aggregates: Pipes.AggregateSpec[],
 	groupBy: string[],
-	whereClause?: any
+	whereClause?: any,
+	explicitMapping?: Map<string, string>
 ): { query: string; params: any[] } {
 	const params: any[] = [];
+
+	// Map main table name
+	const dbTableName = mappingProvider.getTableName(mainModelName);
 
 	// Build SELECT clause
 	const selectFields: string[] = [];
@@ -276,14 +318,14 @@ function buildRawSqlQuery(
 
 	// Add GROUP BY fields to SELECT
 	groupBy.forEach((field, idx) => {
-		const sqlField = buildSqlFieldPath(field);
+		const sqlField = buildSqlFieldPath(field, mainModelName, mappingProvider, 'main', explicitMapping);
 		selectFields.push(`${sqlField} as group_${idx}`);
 	});
 
 	// Add aggregate functions to SELECT
 	aggregates.forEach((agg, idx) => {
 		const { function: func, field } = agg;
-		const sqlField = buildSqlFieldPath(field);
+		const sqlField = buildSqlFieldPath(field, mainModelName, mappingProvider, 'main', explicitMapping);
 
 		let aggExpr: string;
 		switch (func) {
@@ -311,8 +353,8 @@ function buildRawSqlQuery(
 
 	const allSelectFields = [...selectFields, ...aggregateFields].join(', ');
 
-	// Build FROM clause with JOINs for relationships
-	let fromClause = `${tableName} as main`;
+	// Build FROM clause with JOINs
+	let fromClause = `${dbTableName} as main`;
 	const joinedRelations = new Set<string>();
 
 	groupBy.forEach(field => {
@@ -321,22 +363,33 @@ function buildRawSqlQuery(
 			const relationName = parts[0];
 
 			if (!joinedRelations.has(relationName)) {
-				// Simple LEFT JOIN - adjust based on your schema
-				fromClause += ` LEFT JOIN ${relationName} as ${relationName} ON main.${relationName}Id = ${relationName}.id`;
+				const relationTableName = mappingProvider.getTableName(relationName);
+				const foreignKeys = mappingProvider.getForeignKey(mainModelName, relationName);
+				const primaryKeys = mappingProvider.getPrimaryKey(relationName);
+
+				// Build JOIN condition for single or composite keys
+				const joinConditions = foreignKeys.map((fk, idx) => {
+					const fkColumn = mappingProvider.getColumnName(mainModelName, fk);
+					const pkColumn = primaryKeys[idx] || primaryKeys[0];
+					return `main.${fkColumn} = ${relationName}.${pkColumn}`;
+				}).join(' AND ');
+
+				fromClause += ` LEFT JOIN ${relationTableName} as ${relationName} ON ${joinConditions}`;
 				joinedRelations.add(relationName);
 			}
 		}
 	});
 
-	// Build WHERE clause (simplified - expand based on your needs)
+	// Build WHERE clause
 	let whereClauseSql = '';
 	if (whereClause && Object.keys(whereClause).length > 0) {
-		// Simple implementation - you may need to expand this
 		whereClauseSql = 'WHERE 1=1';
 	}
 
 	// Build GROUP BY clause
-	const groupByClause = groupBy.map((field, idx) => buildSqlFieldPath(field)).join(', ');
+	const groupByClause = groupBy
+		.map((field, idx) => buildSqlFieldPath(field, mainModelName, mappingProvider, 'main', explicitMapping))
+		.join(', ');
 
 	// Construct final query
 	const query = `
@@ -361,7 +414,6 @@ function transformToChartSeries(
 ): Pipes.ChartSeries {
 	const dataArray = Array.isArray(data) ? data : [];
 
-	// Empty data handling
 	if (!dataArray || dataArray.length === 0) {
 		const series = aggregates.map(agg => ({
 			name: `${agg.function}(${agg.field})`,
@@ -378,9 +430,8 @@ function transformToChartSeries(
 		};
 	}
 
-	// Time series chart with optional grouping
+	// Time series chart
 	if (chartConfig?.dateField && chartConfig?.interval) {
-		// Check if there's a non-date groupBy field (for grouped time series)
 		const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
 		const hasGrouping = nonDateGroupFields.length > 0;
 
@@ -400,11 +451,8 @@ function transformToChartSeries(
 
 		const timeLabels = generateTimeSeriesLabels(chartConfig.interval, year);
 
-		// Grouped time series: separate series per group (e.g., per category)
 		if (hasGrouping) {
 			const groupField = chartConfig.groupField || nonDateGroupFields[0];
-
-			// Create a map: groupValue -> timeKey -> data items
 			const groupedDataMap = new Map<string, Map<string, any[]>>();
 
 			dataArray.forEach(item => {
@@ -426,7 +474,6 @@ function transformToChartSeries(
 				}
 			});
 
-			// Create series: one per aggregate per group
 			const series: Array<{ name: string; data: number[] }> = [];
 
 			groupedDataMap.forEach((timeMap, groupValue) => {
@@ -465,7 +512,6 @@ function transformToChartSeries(
 			};
 		}
 
-		// Regular time series (no grouping)
 		const dataMap = new Map<string, any[]>();
 
 		dataArray.forEach(item => {
@@ -513,9 +559,8 @@ function transformToChartSeries(
 		};
 	}
 
-	// Grouped (non-time-series) chart
+	// Grouped chart
 	if (groupBy && groupBy.length > 0) {
-		// Determine which field to use for categories
 		const categoryField = chartConfig?.groupField || groupBy[0];
 
 		const categories = dataArray.map(item => {
@@ -550,7 +595,7 @@ function transformToChartSeries(
 		};
 	}
 
-	// Regular chart (no grouping)
+	// Regular chart
 	const categories = dataArray.map((_, idx) => `Category ${idx + 1}`);
 
 	const series = aggregates.map((agg: Pipes.AggregateSpec) => {
@@ -578,40 +623,32 @@ function transformToChartSeries(
 }
 
 /**
- * @description Parse aggregate query string with flexible grouping and advanced chart options
+ * @description Parse aggregate query string with table mapping support
  *
- * Format: aggregate=field1: sum(), field2: count(), groupBy: (field), chart: type(options)
+ * Format: aggregate=field1: sum(), field2: count(), groupBy: (field), groupByMapping: (table.column), chart: type
  *
  * Examples:
  * 
- * 1. Basic aggregation (no grouping):
- *    aggregate=qty: sum(), recQty: sum()
+ * 1. With explicit mapping:
+ *    aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), groupByMapping: (market_master_category.category)
  *
- * 2. Grouped aggregation (sum per category):
- *    aggregate=qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category)
+ * 2. With auto-mapping (uses injected Pipes.MappingProvider):
+ *    aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
  *
- * 3. Multiple groupBy fields:
- *    aggregate=qty: sum(), groupBy: (category, region)
- *
- * 4. Grouped with simple bar chart:
- *    aggregate=qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category), chart: bar
- *
- * 5. Chart with explicit groupField:
- *    aggregate=qty: sum(), recQty: sum(), groupBy: (category, region), chart: bar(category)
- *
- * 6. Horizontal bar chart:
- *    aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
- *
- * 7. Time series line chart:
- *     aggregate=revenue: sum(), chart: line(createdAt, month)
- *
- * 8. GROUPED TIME SERIES - trend per category over time:
- *     aggregate=qty: sum(), groupBy: (marketingMasterCategory.category, createdAt), chart: line(createdAt, month)
- *
- * @returns Prisma aggregate config with groupBy and chart visualization support
+ * 3. Multiple fields mapping:
+ *    aggregate=qty: sum(), groupBy: (category, region), groupByMapping: (product_category, warehouse_region)
  */
 @Injectable()
 export default class AggregatePipe implements PipeTransform {
+	private mappingProvider: Pipes.MappingProvider;
+
+	constructor(
+		private readonly mainModelName: string,
+		mappingProvider?: Pipes.MappingProvider
+	) {
+		this.mappingProvider = mappingProvider || new DefaultMappingProvider();
+	}
+
 	transform(value: string): Pipes.Aggregate | undefined {
 		if (!value || value.trim() === '') return undefined;
 
@@ -625,6 +662,7 @@ export default class AggregatePipe implements PipeTransform {
 			const aggregates: Pipes.AggregateSpec[] = [];
 			let chartConfig: Pipes.ChartConfig | undefined;
 			let groupByFields: string[] = [];
+			let groupByMapping: Map<string, string> | undefined;
 
 			for (const [key, val] of parsed) {
 				// Handle chart configuration
@@ -655,6 +693,27 @@ export default class AggregatePipe implements PipeTransform {
 					}
 				}
 
+				// Handle groupByMapping configuration
+				if (key.toLowerCase() === 'groupbymapping') {
+					if (val) {
+						const mappingFields = parseGroupBy(val);
+						if (mappingFields && mappingFields.length > 0) {
+							groupByMapping = new Map();
+							// Map each groupBy field to its corresponding mapping
+							groupByFields.forEach((field, idx) => {
+								if (mappingFields[idx]) {
+									groupByMapping!.set(field, mappingFields[idx]);
+								}
+							});
+							continue;
+						} else {
+							throw new BadRequestException(
+								'Invalid groupByMapping format. Use: groupByMapping: (table.column) or groupByMapping: (table1.col1, table2.col2)'
+							);
+						}
+					}
+				}
+
 				// Handle aggregate functions
 				if (val) {
 					const aggFunc = parseAggregateFunction(val);
@@ -672,10 +731,7 @@ export default class AggregatePipe implements PipeTransform {
 				throw new BadRequestException('At least one aggregate function is required');
 			}
 
-			// Determine groupBy priority:
-			// 1. Explicit groupBy: (fields) takes precedence
-			// 2. Chart's groupField if specified
-			// 3. Chart's dateField for time series
+			// Determine groupBy
 			let finalGroupBy: string[] = [];
 			if (groupByFields.length > 0) {
 				finalGroupBy = groupByFields;
@@ -689,21 +745,27 @@ export default class AggregatePipe implements PipeTransform {
 			const useRawQuery = isGrouped && hasRelationshipInGroupBy(finalGroupBy);
 
 			if (isGrouped) {
-				// If relationships detected, use raw query
 				if (useRawQuery) {
 					return {
-						prismaQuery: null as any, // Will be replaced with raw query
+						prismaQuery: null as any,
 						aggregates,
 						groupBy: finalGroupBy,
 						isGrouped: true,
 						chartConfig,
 						useRawQuery: true,
 						rawQueryBuilder: (tableName: string, whereClause?: any) =>
-							buildRawSqlQuery(tableName, aggregates, finalGroupBy, whereClause),
+							buildRawSqlQuery(
+								tableName,
+								this.mainModelName,
+								this.mappingProvider,
+								aggregates,
+								finalGroupBy,
+								whereClause,
+								groupByMapping
+							),
 					};
 				}
 
-				// Standard Prisma groupBy
 				const prismaQuery = buildPrismaAggregate(aggregates);
 				return {
 					prismaQuery: {
@@ -741,7 +803,6 @@ export default class AggregatePipe implements PipeTransform {
 		data: any[] | any,
 		aggregateConfig: Pipes.Aggregate,
 	): Pipes.ChartSeries {
-		// Handle non-grouped aggregate
 		if (!aggregateConfig.isGrouped) {
 			if (!data || (Array.isArray(data) && data.length === 0)) {
 				const series = aggregateConfig.aggregates.map((agg: Pipes.AggregateSpec) => ({
@@ -787,7 +848,6 @@ export default class AggregatePipe implements PipeTransform {
 			};
 		}
 
-		// Handle grouped aggregate (including raw query results)
 		const dataArray = Array.isArray(data) ? data : [data];
 		return transformToChartSeries(
 			dataArray,
