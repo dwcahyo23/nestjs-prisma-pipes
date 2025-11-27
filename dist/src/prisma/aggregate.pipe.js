@@ -10,6 +10,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.manualAggregateWithRelationships = manualAggregateWithRelationships;
+exports.manualAggregateForTimeSeries = manualAggregateForTimeSeries;
 const common_1 = require("@nestjs/common");
 const parse_object_literal_1 = __importDefault(require("../helpers/parse-object-literal"));
 const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'];
@@ -42,12 +43,6 @@ function parseGroupBy(value) {
 }
 function hasRelationshipInGroupBy(groupBy) {
     return groupBy.some(field => field.includes('.'));
-}
-function parseRelationshipPath(path) {
-    const parts = path.split('.');
-    const field = parts.pop();
-    const relation = parts.join('.');
-    return { relation, field };
 }
 function parseChartConfig(value) {
     if (!value || typeof value !== 'string')
@@ -140,73 +135,6 @@ function getNestedValue(obj, path) {
         value = value[key];
     }
     return value;
-}
-function buildPrismaAggregate(aggregates) {
-    const aggregateObj = {};
-    for (const agg of aggregates) {
-        const { function: func, field, params } = agg;
-        const funcKey = `_${func}`;
-        if (func === 'count') {
-            if (!params || params.length === 0 || params[0] === '*') {
-                aggregateObj._count = true;
-            }
-            else {
-                aggregateObj._count = aggregateObj._count || {};
-                aggregateObj._count[field] = true;
-            }
-        }
-        else {
-            aggregateObj[funcKey] = aggregateObj[funcKey] || {};
-            aggregateObj[funcKey][field] = true;
-        }
-    }
-    return aggregateObj;
-}
-function buildSelectForFields(groupBy, aggregates) {
-    const select = {};
-    for (const field of groupBy) {
-        if (!field.includes('.')) {
-            select[field] = true;
-        }
-    }
-    for (const agg of aggregates) {
-        if (!agg.field.includes('.')) {
-            select[agg.field] = true;
-        }
-    }
-    return select;
-}
-function buildIncludeForRelationships(groupBy, aggregates) {
-    const include = {};
-    const relationPaths = [
-        ...groupBy.filter(f => f.includes('.')),
-        ...aggregates.filter(agg => agg.field.includes('.')).map(agg => agg.field)
-    ];
-    for (const path of relationPaths) {
-        const { relation, field } = parseRelationshipPath(path);
-        const parts = relation.split('.');
-        let current = include;
-        for (let i = 0; i < parts.length; i++) {
-            const part = parts[i];
-            if (i === parts.length - 1) {
-                if (!current[part]) {
-                    current[part] = { select: {} };
-                }
-                if (typeof current[part] === 'object' && 'select' in current[part]) {
-                    current[part].select[field] = true;
-                }
-            }
-            else {
-                if (!current[part]) {
-                    current[part] = { include: {} };
-                }
-                if (typeof current[part] === 'object' && 'include' in current[part]) {
-                    current = current[part].include;
-                }
-            }
-        }
-    }
-    return include;
 }
 async function manualAggregateWithRelationships(prismaModel, aggregates, groupBy, where) {
     const scalarSelect = buildSelectForFields(groupBy, aggregates);
@@ -632,6 +560,152 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
         raw: dataArray,
     };
 }
+async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, dateField, interval, where) {
+    const scalarSelect = buildSelectForFields([...groupBy, dateField], aggregates);
+    const relationInclude = buildIncludeForRelationships([...groupBy, dateField], aggregates);
+    const queryOptions = { where };
+    if (Object.keys(scalarSelect).length > 0) {
+        queryOptions.select = { ...scalarSelect };
+    }
+    if (Object.keys(relationInclude).length > 0) {
+        if (queryOptions.select) {
+            Object.keys(relationInclude).forEach(key => {
+                queryOptions.select[key] = relationInclude[key];
+            });
+        }
+        else {
+            queryOptions.include = relationInclude;
+        }
+    }
+    const allData = await prismaModel.findMany(queryOptions);
+    const yearRange = extractYearRangeFromData(allData, dateField, interval);
+    const groups = new Map();
+    for (const item of allData) {
+        const dateValue = getNestedValue(item, dateField);
+        if (!dateValue)
+            continue;
+        const timeKey = getTimeKeyEnhanced(dateValue, interval, yearRange?.minYear);
+        const groupKey = groupBy.length > 0
+            ? groupBy.map(field => {
+                const value = getNestedValue(item, field);
+                return String(value ?? 'null');
+            }).join('|||')
+            : 'default';
+        const compositeKey = `${groupKey}|||${timeKey}`;
+        if (!groups.has(compositeKey)) {
+            groups.set(compositeKey, []);
+        }
+        groups.get(compositeKey).push(item);
+    }
+    const results = [];
+    for (const [compositeKey, items] of groups.entries()) {
+        const result = {};
+        const parts = compositeKey.split('|||');
+        const timeKey = parts.pop();
+        const groupKeyParts = parts.join('|||').split('|||');
+        if (groupBy.length > 0) {
+            groupBy.forEach((field, idx) => {
+                const { relation, field: fieldName } = field.includes('.')
+                    ? parseRelationshipPath(field)
+                    : { relation: '', field };
+                if (relation) {
+                    if (!result[relation]) {
+                        result[relation] = {};
+                    }
+                    result[relation][fieldName] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+                }
+                else {
+                    result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+                }
+            });
+        }
+        result[dateField] = timeKey;
+        for (const agg of aggregates) {
+            const { function: func, field } = agg;
+            const funcKey = `_${func}`;
+            if (func === 'count') {
+                result._count = result._count || {};
+                result._count[field] = items.length;
+            }
+            else {
+                result[funcKey] = result[funcKey] || {};
+                const values = items
+                    .map(item => getNestedValue(item, field))
+                    .filter(v => v != null && typeof v === 'number');
+                switch (func) {
+                    case 'sum':
+                        result[funcKey][field] = values.reduce((acc, v) => acc + v, 0);
+                        break;
+                    case 'avg':
+                        result[funcKey][field] = values.length > 0
+                            ? values.reduce((acc, v) => acc + v, 0) / values.length
+                            : 0;
+                        break;
+                    case 'min':
+                        result[funcKey][field] = values.length > 0 ? Math.min(...values) : 0;
+                        break;
+                    case 'max':
+                        result[funcKey][field] = values.length > 0 ? Math.max(...values) : 0;
+                        break;
+                }
+            }
+        }
+        results.push(result);
+    }
+    return results;
+}
+function parseRelationshipPath(path) {
+    const parts = path.split('.');
+    const field = parts.pop();
+    const relation = parts.join('.');
+    return { relation, field };
+}
+function buildSelectForFields(allFields, aggregates) {
+    const select = {};
+    for (const field of allFields) {
+        if (!field.includes('.')) {
+            select[field] = true;
+        }
+    }
+    for (const agg of aggregates) {
+        if (!agg.field.includes('.')) {
+            select[agg.field] = true;
+        }
+    }
+    return select;
+}
+function buildIncludeForRelationships(allFields, aggregates) {
+    const include = {};
+    const relationPaths = [
+        ...allFields.filter(f => f.includes('.')),
+        ...aggregates.filter(agg => agg.field.includes('.')).map(agg => agg.field)
+    ];
+    for (const path of relationPaths) {
+        const { relation, field } = parseRelationshipPath(path);
+        const parts = relation.split('.');
+        let current = include;
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            if (i === parts.length - 1) {
+                if (!current[part]) {
+                    current[part] = { select: {} };
+                }
+                if (typeof current[part] === 'object' && 'select' in current[part]) {
+                    current[part].select[field] = true;
+                }
+            }
+            else {
+                if (!current[part]) {
+                    current[part] = { include: {} };
+                }
+                if (typeof current[part] === 'object' && 'include' in current[part]) {
+                    current = current[part].include;
+                }
+            }
+        }
+    }
+    return include;
+}
 let AggregatePipe = class AggregatePipe {
     transform(value) {
         if (!value || value.trim() === '')
@@ -681,6 +755,19 @@ let AggregatePipe = class AggregatePipe {
             if (aggregates.length === 0) {
                 throw new common_1.BadRequestException('At least one aggregate function is required');
             }
+            const isTimeSeriesChart = !!(chartConfig?.dateField && chartConfig?.interval);
+            if (isTimeSeriesChart) {
+                const finalGroupBy = groupByFields.filter(f => f !== chartConfig.dateField);
+                return {
+                    prismaQuery: null,
+                    aggregates,
+                    groupBy: finalGroupBy,
+                    isGrouped: true,
+                    chartConfig,
+                    useManualAggregation: true,
+                    isTimeSeries: true,
+                };
+            }
             let finalGroupBy = [];
             if (groupByFields.length > 0) {
                 finalGroupBy = groupByFields;
@@ -688,11 +775,8 @@ let AggregatePipe = class AggregatePipe {
             else if (chartConfig?.groupField) {
                 finalGroupBy = [chartConfig.groupField];
             }
-            else if (chartConfig?.dateField) {
-                finalGroupBy = [chartConfig.dateField];
-            }
             const isGrouped = finalGroupBy.length > 0;
-            const hasRelationship = isGrouped && hasRelationshipInGroupBy(finalGroupBy);
+            const hasRelationship = isGrouped && finalGroupBy.some(f => f.includes('.'));
             if (isGrouped) {
                 if (hasRelationship) {
                     return {
@@ -702,6 +786,7 @@ let AggregatePipe = class AggregatePipe {
                         isGrouped: true,
                         chartConfig,
                         useManualAggregation: true,
+                        isTimeSeries: false,
                     };
                 }
                 const prismaQuery = buildPrismaAggregate(aggregates);
@@ -715,6 +800,7 @@ let AggregatePipe = class AggregatePipe {
                     isGrouped: true,
                     chartConfig,
                     useManualAggregation: false,
+                    isTimeSeries: false,
                 };
             }
             const prismaQuery = buildPrismaAggregate(aggregates);
@@ -725,6 +811,7 @@ let AggregatePipe = class AggregatePipe {
                 isGrouped: false,
                 chartConfig,
                 useManualAggregation: false,
+                isTimeSeries: false,
             };
         }
         catch (error) {
@@ -735,6 +822,9 @@ let AggregatePipe = class AggregatePipe {
         }
     }
     static async execute(prismaModel, aggregateConfig, where) {
+        if (aggregateConfig.isTimeSeries && aggregateConfig.chartConfig?.dateField) {
+            return manualAggregateForTimeSeries(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, aggregateConfig.chartConfig.dateField, aggregateConfig.chartConfig.interval, where);
+        }
         if (aggregateConfig.useManualAggregation) {
             return manualAggregateWithRelationships(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, where);
         }
@@ -799,4 +889,25 @@ AggregatePipe = __decorate([
     (0, common_1.Injectable)()
 ], AggregatePipe);
 exports.default = AggregatePipe;
+function buildPrismaAggregate(aggregates) {
+    const aggregateObj = {};
+    for (const agg of aggregates) {
+        const { function: func, field, params } = agg;
+        const funcKey = `_${func}`;
+        if (func === 'count') {
+            if (!params || params.length === 0 || params[0] === '*') {
+                aggregateObj._count = true;
+            }
+            else {
+                aggregateObj._count = aggregateObj._count || {};
+                aggregateObj._count[field] = true;
+            }
+        }
+        else {
+            aggregateObj[funcKey] = aggregateObj[funcKey] || {};
+            aggregateObj[funcKey][field] = true;
+        }
+    }
+    return aggregateObj;
+}
 //# sourceMappingURL=aggregate.pipe.js.map
