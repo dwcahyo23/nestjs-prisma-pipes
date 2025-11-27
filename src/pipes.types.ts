@@ -176,6 +176,7 @@ export namespace Pipes {
 		isGrouped: boolean;
 		chartConfig?: ChartConfig;
 		useRawQuery?: boolean;
+		isTimeSeries: boolean;
 		useManualAggregation: boolean;
 		rawQueryBuilder?: (tableName: string, whereClause?: any) => { query: string; params: any[] };
 

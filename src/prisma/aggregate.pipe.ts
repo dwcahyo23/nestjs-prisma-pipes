@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
 import { Pipes } from 'src/pipes.types';
 
+// ... (semua fungsi helper yang sama seperti sebelumnya)
+// getNestedValue, parseAggregateFunction, parseGroupBy, parseChartConfig, dll.
 /**
  * Supported aggregation functions
  */
@@ -57,15 +59,6 @@ function hasRelationshipInGroupBy(groupBy: string[]): boolean {
 	return groupBy.some(field => field.includes('.'));
 }
 
-/**
- * Parse relationship path into relation name and field
- */
-function parseRelationshipPath(path: string): { relation: string; field: string } {
-	const parts = path.split('.');
-	const field = parts.pop()!;
-	const relation = parts.join('.');
-	return { relation, field };
-}
 
 /**
  * Parse chart configuration
@@ -191,106 +184,7 @@ function getNestedValue(obj: any, path: string): any {
 	return value;
 }
 
-/**
- * Build Prisma aggregate object (for non-grouped queries)
- */
-function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string, any> {
-	const aggregateObj: Record<string, any> = {};
 
-	for (const agg of aggregates) {
-		const { function: func, field, params } = agg;
-		const funcKey = `_${func}`;
-
-		if (func === 'count') {
-			if (!params || params.length === 0 || params[0] === '*') {
-				aggregateObj._count = true;
-			} else {
-				aggregateObj._count = aggregateObj._count || {};
-				aggregateObj._count[field] = true;
-			}
-		} else {
-			aggregateObj[funcKey] = aggregateObj[funcKey] || {};
-			aggregateObj[funcKey][field] = true;
-		}
-	}
-
-	return aggregateObj;
-}
-
-/**
- * Build select object for scalar fields
- */
-function buildSelectForFields(
-	groupBy: string[],
-	aggregates: Pipes.AggregateSpec[]
-): Record<string, any> {
-	const select: Record<string, any> = {};
-
-	// Add scalar fields from groupBy
-	for (const field of groupBy) {
-		if (!field.includes('.')) {
-			select[field] = true;
-		}
-	}
-
-	// Add scalar fields from aggregates
-	for (const agg of aggregates) {
-		if (!agg.field.includes('.')) {
-			select[agg.field] = true;
-		}
-	}
-
-	return select;
-}
-
-/**
- * Build include object for fetching related data with selective fields
- * This is the KEY for handling relationships in aggregation
- */
-function buildIncludeForRelationships(
-	groupBy: string[],
-	aggregates: Pipes.AggregateSpec[]
-): Record<string, any> {
-	const include: Record<string, any> = {};
-
-	// Collect all relationship paths from groupBy and aggregates
-	const relationPaths = [
-		...groupBy.filter(f => f.includes('.')),
-		...aggregates.filter(agg => agg.field.includes('.')).map(agg => agg.field)
-	];
-
-	for (const path of relationPaths) {
-		const { relation, field } = parseRelationshipPath(path);
-
-		// Build nested include structure with select
-		const parts = relation.split('.');
-		let current = include;
-
-		for (let i = 0; i < parts.length; i++) {
-			const part = parts[i];
-
-			if (i === parts.length - 1) {
-				// Last part - include with select for specific field
-				if (!current[part]) {
-					current[part] = { select: {} };
-				}
-				if (typeof current[part] === 'object' && 'select' in current[part]) {
-					current[part].select[field] = true;
-				}
-			} else {
-				// Nested relation
-				if (!current[part]) {
-					current[part] = { include: {} };
-				}
-				if (typeof current[part] === 'object' && 'include' in current[part]) {
-					current = current[part].include;
-				}
-			}
-		}
-	}
-
-	return include;
-}
 
 /**
  * Perform manual aggregation with relationships
@@ -896,12 +790,224 @@ function transformToChartSeries(
 }
 
 /**
- * Aggregate Pipe - Enhanced with relationship support
- * 
- * Now supports:
- * - Regular aggregation: aggregate=qty: sum(), recQty: sum()
- * - Grouped aggregation WITH relationships: aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
- * - Charts with relationships: aggregate=qty: sum(), groupBy: (marketingMasterCategory.category), chart: bar
+ * Manual aggregation untuk TIME SERIES dengan grouping
+ * Ini adalah KEY FIX - tidak perlu datetime di groupBy
+ */
+async function manualAggregateForTimeSeries(
+	prismaModel: any,
+	aggregates: Pipes.AggregateSpec[],
+	groupBy: string[], // groupBy fields (TANPA dateField)
+	dateField: string,
+	interval: Pipes.TimeInterval,
+	where?: any
+): Promise<any[]> {
+	// Step 1: Fetch semua data dengan select minimal
+	const scalarSelect = buildSelectForFields([...groupBy, dateField], aggregates);
+	const relationInclude = buildIncludeForRelationships([...groupBy, dateField], aggregates);
+
+	const queryOptions: any = { where };
+
+	if (Object.keys(scalarSelect).length > 0) {
+		queryOptions.select = { ...scalarSelect };
+	}
+
+	if (Object.keys(relationInclude).length > 0) {
+		if (queryOptions.select) {
+			Object.keys(relationInclude).forEach(key => {
+				queryOptions.select[key] = relationInclude[key];
+			});
+		} else {
+			queryOptions.include = relationInclude;
+		}
+	}
+
+	const allData = await prismaModel.findMany(queryOptions);
+
+	// Step 2: Extract year range untuk generate labels
+	const yearRange = extractYearRangeFromData(allData, dateField, interval);
+
+	// Step 3: Group data by (groupBy fields + time interval)
+	const groups = new Map<string, any[]>();
+
+	for (const item of allData) {
+		const dateValue = getNestedValue(item, dateField);
+		if (!dateValue) continue;
+
+		// Generate time key dari dateValue
+		const timeKey = getTimeKeyEnhanced(dateValue, interval, yearRange?.minYear);
+
+		// Generate group key dari groupBy fields
+		const groupKey = groupBy.length > 0
+			? groupBy.map(field => {
+				const value = getNestedValue(item, field);
+				return String(value ?? 'null');
+			}).join('|||')
+			: 'default';
+
+		// Combine group + time key
+		const compositeKey = `${groupKey}|||${timeKey}`;
+
+		if (!groups.has(compositeKey)) {
+			groups.set(compositeKey, []);
+		}
+		groups.get(compositeKey)!.push(item);
+	}
+
+	// Step 4: Calculate aggregates untuk setiap group
+	const results: any[] = [];
+
+	for (const [compositeKey, items] of groups.entries()) {
+		const result: any = {};
+		const parts = compositeKey.split('|||');
+		const timeKey = parts.pop()!; // Last part is time key
+		const groupKeyParts = parts.join('|||').split('|||');
+
+		// Add groupBy fields ke result
+		if (groupBy.length > 0) {
+			groupBy.forEach((field, idx) => {
+				const { relation, field: fieldName } = field.includes('.')
+					? parseRelationshipPath(field)
+					: { relation: '', field };
+
+				if (relation) {
+					if (!result[relation]) {
+						result[relation] = {};
+					}
+					result[relation][fieldName] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+				} else {
+					result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+				}
+			});
+		}
+
+		// Add time key ke result
+		result[dateField] = timeKey;
+
+		// Calculate aggregates
+		for (const agg of aggregates) {
+			const { function: func, field } = agg;
+			const funcKey = `_${func}`;
+
+			if (func === 'count') {
+				result._count = result._count || {};
+				result._count[field] = items.length;
+			} else {
+				result[funcKey] = result[funcKey] || {};
+
+				const values = items
+					.map(item => getNestedValue(item, field))
+					.filter(v => v != null && typeof v === 'number');
+
+				switch (func) {
+					case 'sum':
+						result[funcKey][field] = values.reduce((acc, v) => acc + v, 0);
+						break;
+					case 'avg':
+						result[funcKey][field] = values.length > 0
+							? values.reduce((acc, v) => acc + v, 0) / values.length
+							: 0;
+						break;
+					case 'min':
+						result[funcKey][field] = values.length > 0 ? Math.min(...values) : 0;
+						break;
+					case 'max':
+						result[funcKey][field] = values.length > 0 ? Math.max(...values) : 0;
+						break;
+				}
+			}
+		}
+
+		results.push(result);
+	}
+
+	return results;
+}
+
+/**
+ * Parse relationship path into relation name and field
+ */
+function parseRelationshipPath(path: string): { relation: string; field: string } {
+	const parts = path.split('.');
+	const field = parts.pop()!;
+	const relation = parts.join('.');
+	return { relation, field };
+}
+
+/**
+ * Build select object for scalar fields
+ */
+function buildSelectForFields(
+	allFields: string[],
+	aggregates: Pipes.AggregateSpec[]
+): Record<string, any> {
+	const select: Record<string, any> = {};
+
+	// Add scalar fields from allFields
+	for (const field of allFields) {
+		if (!field.includes('.')) {
+			select[field] = true;
+		}
+	}
+
+	// Add scalar fields from aggregates
+	for (const agg of aggregates) {
+		if (!agg.field.includes('.')) {
+			select[agg.field] = true;
+		}
+	}
+
+	return select;
+}
+
+/**
+ * Build include object for relationships
+ */
+function buildIncludeForRelationships(
+	allFields: string[],
+	aggregates: Pipes.AggregateSpec[]
+): Record<string, any> {
+	const include: Record<string, any> = {};
+
+	const relationPaths = [
+		...allFields.filter(f => f.includes('.')),
+		...aggregates.filter(agg => agg.field.includes('.')).map(agg => agg.field)
+	];
+
+	for (const path of relationPaths) {
+		const { relation, field } = parseRelationshipPath(path);
+		const parts = relation.split('.');
+		let current = include;
+
+		for (let i = 0; i < parts.length; i++) {
+			const part = parts[i];
+
+			if (i === parts.length - 1) {
+				if (!current[part]) {
+					current[part] = { select: {} };
+				}
+				if (typeof current[part] === 'object' && 'select' in current[part]) {
+					current[part].select[field] = true;
+				}
+			} else {
+				if (!current[part]) {
+					current[part] = { include: {} };
+				}
+				if (typeof current[part] === 'object' && 'include' in current[part]) {
+					current = current[part].include;
+				}
+			}
+		}
+	}
+
+	return include;
+}
+
+// ... (semua fungsi helper time series yang sama)
+// getTimeKey, getTimeKeyEnhanced, extractYearRangeFromData, 
+// generateTimeSeriesLabelsEnhanced, parseStringToTimeKey, dll.
+
+/**
+ * Aggregate Pipe - FIXED untuk time series tanpa groupBy datetime
  */
 @Injectable()
 export default class AggregatePipe implements PipeTransform {
@@ -962,32 +1068,48 @@ export default class AggregatePipe implements PipeTransform {
 				throw new BadRequestException('At least one aggregate function is required');
 			}
 
+			// ✅ KEY FIX: Deteksi time series chart
+			const isTimeSeriesChart = !!(chartConfig?.dateField && chartConfig?.interval);
+
+			if (isTimeSeriesChart) {
+				// TIME SERIES: Gunakan manual aggregation, JANGAN tambahkan dateField ke groupBy
+				const finalGroupBy = groupByFields.filter(f => f !== chartConfig!.dateField);
+
+				return {
+					prismaQuery: null as any,
+					aggregates,
+					groupBy: finalGroupBy, // ✅ groupBy TANPA dateField
+					isGrouped: true,
+					chartConfig,
+					useManualAggregation: true,
+					isTimeSeries: true, // ✅ Flag baru
+				};
+			}
+
+			// NON-TIME-SERIES: Logic yang sama seperti sebelumnya
 			let finalGroupBy: string[] = [];
 			if (groupByFields.length > 0) {
 				finalGroupBy = groupByFields;
 			} else if (chartConfig?.groupField) {
 				finalGroupBy = [chartConfig.groupField];
-			} else if (chartConfig?.dateField) {
-				finalGroupBy = [chartConfig.dateField];
 			}
 
 			const isGrouped = finalGroupBy.length > 0;
-			const hasRelationship = isGrouped && hasRelationshipInGroupBy(finalGroupBy);
+			const hasRelationship = isGrouped && finalGroupBy.some(f => f.includes('.'));
 
 			if (isGrouped) {
 				if (hasRelationship) {
-					// Use manual aggregation for relationships
 					return {
 						prismaQuery: null as any,
 						aggregates,
 						groupBy: finalGroupBy,
 						isGrouped: true,
 						chartConfig,
-						useManualAggregation: true, // NEW FLAG
+						useManualAggregation: true,
+						isTimeSeries: false,
 					};
 				}
 
-				// Standard Prisma groupBy (no relationships)
 				const prismaQuery = buildPrismaAggregate(aggregates);
 				return {
 					prismaQuery: {
@@ -999,6 +1121,7 @@ export default class AggregatePipe implements PipeTransform {
 					isGrouped: true,
 					chartConfig,
 					useManualAggregation: false,
+					isTimeSeries: false,
 				};
 			}
 
@@ -1010,6 +1133,7 @@ export default class AggregatePipe implements PipeTransform {
 				isGrouped: false,
 				chartConfig,
 				useManualAggregation: false,
+				isTimeSeries: false,
 			};
 		} catch (error) {
 			if (error instanceof BadRequestException) throw error;
@@ -1019,15 +1143,27 @@ export default class AggregatePipe implements PipeTransform {
 	}
 
 	/**
-	 * Execute aggregate query - handles both Prisma native and manual aggregation
+	 * Execute aggregate query - FIXED dengan time series support
 	 */
 	static async execute(
 		prismaModel: any,
 		aggregateConfig: Pipes.Aggregate,
 		where?: any
 	): Promise<any> {
+		// ✅ TIME SERIES: Gunakan manual aggregation khusus
+		if (aggregateConfig.isTimeSeries && aggregateConfig.chartConfig?.dateField) {
+			return manualAggregateForTimeSeries(
+				prismaModel,
+				aggregateConfig.aggregates,
+				aggregateConfig.groupBy, // groupBy TANPA dateField
+				aggregateConfig.chartConfig.dateField,
+				aggregateConfig.chartConfig.interval!,
+				where
+			);
+		}
+
+		// Manual aggregation untuk relationships (non-time-series)
 		if (aggregateConfig.useManualAggregation) {
-			// Use manual aggregation for relationships
 			return manualAggregateWithRelationships(
 				prismaModel,
 				aggregateConfig.aggregates,
@@ -1036,7 +1172,7 @@ export default class AggregatePipe implements PipeTransform {
 			);
 		}
 
-		// Use Prisma's native aggregation
+		// Prisma native aggregation
 		if (aggregateConfig.isGrouped) {
 			return prismaModel.groupBy({
 				...aggregateConfig.prismaQuery,
@@ -1051,7 +1187,7 @@ export default class AggregatePipe implements PipeTransform {
 	}
 
 	/**
-	 * Transform Prisma result to chart-ready format
+	 * Transform to chart series - sama seperti sebelumnya
 	 */
 	static toChartSeries(
 		data: any[] | any,
@@ -1112,5 +1248,31 @@ export default class AggregatePipe implements PipeTransform {
 	}
 }
 
-// Export the manual aggregation function for external use
-export { manualAggregateWithRelationships };
+/**
+ * Build Prisma aggregate object
+ */
+function buildPrismaAggregate(aggregates: Pipes.AggregateSpec[]): Record<string, any> {
+	const aggregateObj: Record<string, any> = {};
+
+	for (const agg of aggregates) {
+		const { function: func, field, params } = agg;
+		const funcKey = `_${func}`;
+
+		if (func === 'count') {
+			if (!params || params.length === 0 || params[0] === '*') {
+				aggregateObj._count = true;
+			} else {
+				aggregateObj._count = aggregateObj._count || {};
+				aggregateObj._count[field] = true;
+			}
+		} else {
+			aggregateObj[funcKey] = aggregateObj[funcKey] || {};
+			aggregateObj[funcKey][field] = true;
+		}
+	}
+
+	return aggregateObj;
+}
+
+// Export fungsi manual aggregation
+export { manualAggregateWithRelationships, manualAggregateForTimeSeries };
