@@ -408,6 +408,7 @@ function generateTimeSeriesLabelsEnhanced(
 
 		case 'month': {
 			const year = specifiedYear || yearRange?.minYear || currentYear;
+			// ✅ FIX: Hanya generate untuk 1 tahun saja
 			for (let i = 0; i < 12; i++) {
 				const date = new Date(Date.UTC(year, i, 1));
 				labels.push(date.toLocaleString('en-US', {
@@ -426,7 +427,7 @@ function generateTimeSeriesLabelsEnhanced(
 					labels.push((specifiedYear - i).toString());
 				}
 			} else if (yearRange) {
-				// Generate dari minYear sampai maxYear dari data aktual
+				// ✅ FIX: Generate dari minYear sampai maxYear
 				for (let y = yearRange.minYear; y <= yearRange.maxYear; y++) {
 					labels.push(y.toString());
 				}
@@ -799,15 +800,15 @@ function transformToChartSeries(
 }
 
 /**
- * Manual aggregation untuk TIME SERIES dengan grouping
- * Ini adalah KEY FIX - tidak perlu datetime di groupBy
+ * FIXED: Manual aggregation untuk TIME SERIES dengan year filtering
  */
 async function manualAggregateForTimeSeries(
 	prismaModel: any,
 	aggregates: Pipes.AggregateSpec[],
-	groupBy: string[], // groupBy fields (TANPA dateField)
+	groupBy: string[],
 	dateField: string,
 	interval: Pipes.TimeInterval,
+	year: number | undefined,
 	where?: any
 ): Promise<any[]> {
 	// Step 1: Fetch semua data dengan select minimal
@@ -832,13 +833,54 @@ async function manualAggregateForTimeSeries(
 
 	const allData = await prismaModel.findMany(queryOptions);
 
+	// // ✅ DEBUG: Log data sebelum filter
+	// console.log('Total data fetched:', allData.length);
+	// console.log('Year to filter:', year);
+
+	// ✅ FIX: Filter data berdasarkan year jika ditentukan
+	let filteredData = allData;
+	if (year) {
+		filteredData = allData.filter((item: any) => {
+			const dateValue = getNestedValue(item, dateField);
+			if (!dateValue) return false;
+
+			try {
+				// Handle string format "Jan 2025", "2025", atau Date object
+				const str = String(dateValue).trim();
+
+				// Check if it's already in "MMM YYYY" format
+				if (/^[A-Za-z]{3}\s\d{4}$/.test(str)) {
+					const yearMatch = str.match(/\d{4}$/);
+					return yearMatch ? parseInt(yearMatch[0], 10) === year : false;
+				}
+
+				// Check if it's just a year "2025"
+				if (/^\d{4}$/.test(str)) {
+					return parseInt(str, 10) === year;
+				}
+
+				// Try parsing as date
+				const date = new Date(dateValue);
+				if (isNaN(date.getTime())) return false;
+				return date.getUTCFullYear() === year;
+			} catch {
+				return false;
+			}
+		});
+	}
+
+	// ✅ DEBUG: Log data setelah filter
+	// console.log('Filtered data count:', filteredData.length);
+
 	// Step 2: Extract year range untuk generate labels
-	const yearRange = extractYearRangeFromData(allData, dateField, interval);
+	const yearRange = year
+		? { minYear: year, maxYear: year }
+		: extractYearRangeFromData(filteredData, dateField, interval);
 
 	// Step 3: Group data by (groupBy fields + time interval)
 	const groups = new Map<string, any[]>();
 
-	for (const item of allData) {
+	for (const item of filteredData) {
 		const dateValue = getNestedValue(item, dateField);
 		if (!dateValue) continue;
 
@@ -868,7 +910,7 @@ async function manualAggregateForTimeSeries(
 	for (const [compositeKey, items] of groups.entries()) {
 		const result: any = {};
 		const parts = compositeKey.split('|||');
-		const timeKey = parts.pop()!; // Last part is time key
+		const timeKey = parts.pop()!;
 		const groupKeyParts = parts.join('|||').split('|||');
 
 		// Add groupBy fields ke result
@@ -931,6 +973,7 @@ async function manualAggregateForTimeSeries(
 
 	return results;
 }
+
 
 /**
  * Parse relationship path into relation name and field
@@ -1159,16 +1202,25 @@ export default class AggregatePipe implements PipeTransform {
 		aggregateConfig: Pipes.Aggregate,
 		where?: any
 	): Promise<any> {
-		// ✅ TIME SERIES: Gunakan manual aggregation khusus
+		// ✅ TIME SERIES: Pass year parameter ke manual aggregation
 		if (aggregateConfig.isTimeSeries && aggregateConfig.chartConfig?.dateField) {
-			return manualAggregateForTimeSeries(
+			const result = await manualAggregateForTimeSeries(
 				prismaModel,
 				aggregateConfig.aggregates,
-				aggregateConfig.groupBy, // groupBy TANPA dateField
+				aggregateConfig.groupBy,
 				aggregateConfig.chartConfig.dateField,
 				aggregateConfig.chartConfig.interval!,
+				aggregateConfig.chartConfig.year, // ✅ Pass year parameter
 				where
 			);
+
+			// // ✅ DEBUG: Log untuk memverifikasi data
+			// console.log('Execute result count:', result.length);
+			// if (result.length > 0) {
+			// 	console.log('Sample data:', result[0]);
+			// }
+
+			return result;
 		}
 
 		// Manual aggregation untuk relationships (non-time-series)

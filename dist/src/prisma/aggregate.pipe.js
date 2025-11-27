@@ -563,7 +563,7 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
         raw: dataArray,
     };
 }
-async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, dateField, interval, where) {
+async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, dateField, interval, year, where) {
     const scalarSelect = buildSelectForFields([...groupBy, dateField], aggregates);
     const relationInclude = buildIncludeForRelationships([...groupBy, dateField], aggregates);
     const queryOptions = { where };
@@ -581,9 +581,36 @@ async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, da
         }
     }
     const allData = await prismaModel.findMany(queryOptions);
-    const yearRange = extractYearRangeFromData(allData, dateField, interval);
+    let filteredData = allData;
+    if (year) {
+        filteredData = allData.filter((item) => {
+            const dateValue = getNestedValue(item, dateField);
+            if (!dateValue)
+                return false;
+            try {
+                const str = String(dateValue).trim();
+                if (/^[A-Za-z]{3}\s\d{4}$/.test(str)) {
+                    const yearMatch = str.match(/\d{4}$/);
+                    return yearMatch ? parseInt(yearMatch[0], 10) === year : false;
+                }
+                if (/^\d{4}$/.test(str)) {
+                    return parseInt(str, 10) === year;
+                }
+                const date = new Date(dateValue);
+                if (isNaN(date.getTime()))
+                    return false;
+                return date.getUTCFullYear() === year;
+            }
+            catch {
+                return false;
+            }
+        });
+    }
+    const yearRange = year
+        ? { minYear: year, maxYear: year }
+        : extractYearRangeFromData(filteredData, dateField, interval);
     const groups = new Map();
-    for (const item of allData) {
+    for (const item of filteredData) {
         const dateValue = getNestedValue(item, dateField);
         if (!dateValue)
             continue;
@@ -826,7 +853,8 @@ let AggregatePipe = class AggregatePipe {
     }
     static async execute(prismaModel, aggregateConfig, where) {
         if (aggregateConfig.isTimeSeries && aggregateConfig.chartConfig?.dateField) {
-            return manualAggregateForTimeSeries(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, aggregateConfig.chartConfig.dateField, aggregateConfig.chartConfig.interval, where);
+            const result = await manualAggregateForTimeSeries(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, aggregateConfig.chartConfig.dateField, aggregateConfig.chartConfig.interval, aggregateConfig.chartConfig.year, where);
+            return result;
         }
         if (aggregateConfig.useManualAggregation) {
             return manualAggregateWithRelationships(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, where);
