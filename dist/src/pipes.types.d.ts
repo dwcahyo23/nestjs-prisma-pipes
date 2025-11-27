@@ -45,6 +45,7 @@ export declare namespace Pipes {
         groupField?: string;
         dateField?: string;
         interval?: TimeInterval;
+        year?: number;
         stacked?: boolean;
         horizontal?: boolean;
     }
@@ -66,8 +67,8 @@ export declare namespace Pipes {
         isGrouped: boolean;
         chartConfig?: ChartConfig;
         useRawQuery?: boolean;
-        isTimeSeries: boolean;
         useManualAggregation: boolean;
+        isTimeSeries: boolean;
         rawQueryBuilder?: (tableName: string, whereClause?: any) => {
             query: string;
             params: any[];

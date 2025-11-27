@@ -51,32 +51,30 @@ function parseChartConfig(value) {
     if (chartTypes.includes(value.toLowerCase())) {
         return { type: value.toLowerCase() };
     }
-    const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^)]+))?\)$/i.exec(value.trim());
+    const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(value.trim());
     if (!match)
         return null;
-    const [, type, firstParam, secondParam] = match;
+    const [, type, firstParam, intervalPart, yearPart] = match;
     const chartType = type.toLowerCase();
     const timeIntervals = ['day', 'month', 'year'];
-    if (timeIntervals.includes(secondParam?.toLowerCase())) {
+    const interval = intervalPart?.toLowerCase().trim();
+    const year = yearPart ? parseInt(yearPart, 10) : undefined;
+    if (interval && timeIntervals.includes(interval)) {
         return {
             type: chartType,
             dateField: firstParam.trim(),
-            interval: secondParam.toLowerCase(),
+            interval: interval,
+            year,
         };
     }
     const options = { type: chartType, groupField: firstParam.trim() };
-    if (secondParam) {
-        const option = secondParam.toLowerCase().trim();
+    if (intervalPart) {
+        const option = intervalPart.toLowerCase().trim();
         if (option === 'stacked') {
             options.stacked = true;
         }
         else if (option === 'horizontal') {
             options.horizontal = true;
-        }
-        else if (timeIntervals.includes(option)) {
-            options.dateField = firstParam.trim();
-            options.interval = option;
-            delete options.groupField;
         }
     }
     return options;
@@ -270,12 +268,12 @@ function extractYearRangeFromData(dataArray, dateField, interval) {
         maxYear: Math.max(...years)
     };
 }
-function generateTimeSeriesLabelsEnhanced(interval, yearRange) {
+function generateTimeSeriesLabelsEnhanced(interval, yearRange, specifiedYear) {
     const labels = [];
     const currentYear = new Date().getFullYear();
     switch (interval) {
         case 'day': {
-            const year = yearRange?.minYear || currentYear;
+            const year = specifiedYear || yearRange?.minYear || currentYear;
             for (let m = 0; m < 12; m++) {
                 const daysInMonth = new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
                 for (let d = 1; d <= daysInMonth; d++) {
@@ -287,7 +285,7 @@ function generateTimeSeriesLabelsEnhanced(interval, yearRange) {
             break;
         }
         case 'month': {
-            const year = yearRange?.minYear || currentYear;
+            const year = specifiedYear || yearRange?.minYear || currentYear;
             for (let i = 0; i < 12; i++) {
                 const date = new Date(Date.UTC(year, i, 1));
                 labels.push(date.toLocaleString('en-US', {
@@ -299,7 +297,12 @@ function generateTimeSeriesLabelsEnhanced(interval, yearRange) {
             break;
         }
         case 'year': {
-            if (yearRange) {
+            if (specifiedYear) {
+                for (let i = 4; i >= 0; i--) {
+                    labels.push((specifiedYear - i).toString());
+                }
+            }
+            else if (yearRange) {
                 for (let y = yearRange.minYear; y <= yearRange.maxYear; y++) {
                     labels.push(y.toString());
                 }
@@ -415,7 +418,7 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
         const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
         const hasGrouping = nonDateGroupFields.length > 0;
         const yearRange = extractYearRangeFromData(dataArray, chartConfig.dateField, chartConfig.interval);
-        const timeLabels = generateTimeSeriesLabelsEnhanced(chartConfig.interval, yearRange || undefined);
+        const timeLabels = generateTimeSeriesLabelsEnhanced(chartConfig.interval, yearRange || undefined, chartConfig.year);
         if (hasGrouping) {
             const groupField = chartConfig.groupField || nonDateGroupFields[0];
             const groupedDataMap = new Map();
@@ -423,7 +426,7 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
                 const dateValue = getNestedValue(item, chartConfig.dateField);
                 const groupValue = String(getNestedValue(item, groupField) ?? 'null');
                 if (dateValue) {
-                    const timeKey = getTimeKeyEnhanced(dateValue, chartConfig.interval, yearRange?.minYear);
+                    const timeKey = getTimeKeyEnhanced(dateValue, chartConfig.interval, chartConfig.year || yearRange?.minYear);
                     if (!groupedDataMap.has(groupValue)) {
                         groupedDataMap.set(groupValue, new Map());
                     }

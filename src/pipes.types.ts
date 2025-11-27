@@ -147,6 +147,7 @@ export namespace Pipes {
 		groupField?: string;        // Field to use for chart categories
 		dateField?: string;         // For time series charts
 		interval?: TimeInterval;    // Time interval for time series
+		year?: number;
 		stacked?: boolean;          // Stack multiple series
 		horizontal?: boolean;       // Horizontal orientation (for bar charts)
 	}
@@ -176,8 +177,8 @@ export namespace Pipes {
 		isGrouped: boolean;
 		chartConfig?: ChartConfig;
 		useRawQuery?: boolean;
-		isTimeSeries: boolean;
 		useManualAggregation: boolean;
+		isTimeSeries: boolean;
 		rawQueryBuilder?: (tableName: string, whereClause?: any) => { query: string; params: any[] };
 
 		// Deprecated fields (kept for backward compatibility)

@@ -265,10 +265,41 @@ GET /products/stats?aggregate=qty: sum(), groupBy: (warehouse.region, marketingM
 - Fetches with `{ warehouse: true, marketingMasterCategory: true }`
 - Groups by composite key: `region|||category`
 - Stacks series by category per region
+- [Year Parameter for Time Series](#year-parameter-support-for-time-series)
 
 **Example 3: Time Series with Relationships**
 ```bash
 GET /orders/stats?aggregate=revenue: sum(), groupBy: (customer.segment, orderDate), chart: line(orderDate, month)
+```
+
+**Example 4: Annual Report with Year Lock**
+```bash
+GET /orders/stats?aggregate=revenue: sum(), groupBy: (status), chart: line(orderDate, month:2025)&where=orderDate: gte(2025-01-01), orderDate: lte(2025-12-31)
+```
+
+**What happens:**
+1. Filters data for year 2025
+2. Groups by status (Completed, Pending, Cancelled)
+3. Generates 12 month labels for 2025
+4. Creates separate line series for each status
+5. Even if some months have no data, shows 0 values
+
+**Result:**
+```json
+{
+  "categories": ["Jan 2025", "Feb 2025", ..., "Dec 2025"],
+  "series": [
+    {
+      "name": "Completed - sum(revenue)",
+      "data": [15000, 18000, 22000, 25000, 28000, 30000, 32000, 35000, 33000, 31000, 29000, 27000]
+    },
+    {
+      "name": "Pending - sum(revenue)",
+      "data": [5000, 6000, 4000, 3000, 2000, 1000, 500, 300, 200, 100, 0, 0]
+    }
+  ],
+  "chartType": "line"
+}
 ```
 
 **Processing:**
@@ -520,6 +551,206 @@ Need to group by relationship field?
 │
 └─ No → Use Prisma groupBy (Standard)
          └─ ✅ Fastest option
+```
+
+##### Year Parameter Support for Time Series
+
+**New in v2.4.6**: Specify exact years for time series charts to control the time range displayed.
+
+**Syntax:**
+```url
+chart: line(dateField, interval:year)
+chart: bar(dateField, month:year)
+```
+
+**Features:**
+- **🎯 Exact Year Control**: Specify which year to display for day/month intervals
+- **📅 Year Range Control**: Define ending year for year interval (shows 5 years back)
+- **🔄 Auto-Detection Fallback**: If no year specified, automatically detects from data
+- **📊 Consistent Labels**: Ensures chart labels match the specified year
+
+**Examples:**
+
+**1. Month Chart with Specific Year**
+```bash
+# Show only Jan 2025 - Dec 2025
+GET /orders/stats?aggregate=revenue: sum(), groupBy: (status), chart: line(orderDate, month:2025)
+```
+
+**Result:**
+```json
+{
+  "categories": [
+    "Jan 2025", "Feb 2025", "Mar 2025", "Apr 2025",
+    "May 2025", "Jun 2025", "Jul 2025", "Aug 2025",
+    "Sep 2025", "Oct 2025", "Nov 2025", "Dec 2025"
+  ],
+  "series": [
+    {
+      "name": "Completed - sum(revenue)",
+      "data": [15000, 18000, 22000, ...]
+    },
+    {
+      "name": "Pending - sum(revenue)",
+      "data": [5000, 6000, 4000, ...]
+    }
+  ]
+}
+```
+
+**2. Year Chart with End Year**
+```bash
+# Show 2021, 2022, 2023, 2024, 2025 (5 years back from 2025)
+GET /orders/stats?aggregate=revenue: sum(), chart: line(orderDate, year:2025)
+```
+
+**Result:**
+```json
+{
+  "categories": ["2021", "2022", "2023", "2024", "2025"],
+  "series": [
+    {
+      "name": "sum(revenue)",
+      "data": [120000, 145000, 180000, 210000, 250000]
+    }
+  ]
+}
+```
+
+**3. Day Chart with Specific Year**
+```bash
+# Show all days in 2024
+GET /orders/stats?aggregate=count: count(), chart: area(orderDate, day:2024)
+```
+
+**Behavior:**
+
+| Interval | Without Year Parameter | With Year Parameter |
+|----------|----------------------|-------------------|
+| **month** | Auto-detects from data | Shows 12 months of specified year |
+| **year** | Shows 5 years (current - 4 to current) | Shows 5 years (specified - 4 to specified) |
+| **day** | Auto-detects from data | Shows all 365/366 days of specified year |
+
+**Use Cases:**
+
+1. **Annual Reports** - Lock charts to specific fiscal year
+```url
+   ?aggregate=sales: sum(), chart: line(saleDate, month:2024)
+```
+
+2. **Historical Comparison** - Compare specific years
+```url
+   ?aggregate=orders: count(), chart: bar(orderDate, year:2025)
+```
+
+3. **Budget Planning** - Project data for upcoming year
+```url
+   ?aggregate=forecast: sum(), chart: line(projectionDate, month:2026)
+```
+
+4. **YoY Analysis** - Fix year for consistent comparison
+```url
+   # 2024 data
+   ?aggregate=revenue: sum(), chart: line(date, month:2024)
+   
+   # 2025 data (for comparison)
+   ?aggregate=revenue: sum(), chart: line(date, month:2025)
+```
+
+**Type Definition Updates:**
+```typescript
+export namespace Pipes {
+  export interface ChartConfig {
+    type: ChartType;
+    groupField?: string;
+    dateField?: string;
+    interval?: TimeInterval;
+    year?: number;              // NEW: Specify year for time series
+    stacked?: boolean;
+    horizontal?: boolean;
+  }
+}
+```
+
+**Pattern Matching:**
+
+The pipe now supports these patterns:
+```typescript
+// Basic time series
+"line(orderDate, month)"        // Auto-detect year from data
+
+// With year parameter
+"line(orderDate, month:2025)"   // Jan 2025 - Dec 2025
+"bar(orderDate, year:2025)"     // 2021, 2022, 2023, 2024, 2025
+"area(orderDate, day:2024)"     // All days in 2024
+
+// Combined with grouping
+"line(orderDate, month:2025), groupBy: (status)"  // Multi-series for 2025
+```
+
+**Priority Order:**
+
+When generating time labels, the system follows this priority:
+1. **Specified Year** (`year:2025`) - Highest priority
+2. **Data Year Range** (auto-detected from actual data)
+3. **Current Year** (fallback if no data)
+
+**Example with Real Data:**
+```typescript
+// Controller
+@Get('stats')
+async getStats(
+  @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate
+): Promise<Pipes.ChartSeries> {
+  // Query: ?aggregate=revenue: sum(), chart: line(orderDate, month:2025)
+  
+  // Even if data has 2023, 2024, 2025 orders
+  // Chart will only show Jan 2025 - Dec 2025
+  
+  const data = await AggregatePipe.execute(
+    this.prisma.order,
+    aggregate
+  );
+  
+  return AggregatePipe.toChartSeries(data, aggregate);
+  // Returns labels: ["Jan 2025", "Feb 2025", ..., "Dec 2025"]
+}
+```
+
+**Migration from v2.4.2:**
+
+No breaking changes! Existing queries work as before:
+```bash
+# Old behavior (still works)
+?aggregate=qty: sum(), chart: line(orderDate, month)
+# → Auto-detects year from data
+
+# New behavior (optional enhancement)
+?aggregate=qty: sum(), chart: line(orderDate, month:2025)
+# → Forces Jan 2025 - Dec 2025
+```
+
+**Notes:**
+
+- Year parameter is **optional** - backward compatible with v2.4.2
+- For `month` and `day` intervals: year parameter locks to that specific year
+- For `year` interval: year parameter defines the end year (shows 5 years back)
+- Invalid years are ignored and fallback to auto-detection
+- Year must be 4-digit format (e.g., `2025`, not `25`)
+
+**Common Patterns:**
+```bash
+# Financial year reporting
+?aggregate=revenue: sum(), groupBy: (department), chart: bar(date, month:2024)
+
+# Multi-year trend (5 years ending 2025)
+?aggregate=customers: count(), chart: line(signupDate, year:2025)
+
+# Daily analytics for specific year
+?aggregate=visits: count(), chart: area(visitDate, day:2024)
+
+# Quarterly comparison with year lock
+?aggregate=sales: sum(), groupBy: (quarter, status), chart: bar(date, month:2025, stacked)
 ```
 
 ---

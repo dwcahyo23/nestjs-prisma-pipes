@@ -2,8 +2,7 @@ import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
 import { Pipes } from 'src/pipes.types';
 
-// ... (semua fungsi helper yang sama seperti sebelumnya)
-// getNestedValue, parseAggregateFunction, parseGroupBy, parseChartConfig, dll.
+
 /**
  * Supported aggregation functions
  */
@@ -68,6 +67,7 @@ function parseChartConfig(value: string): {
 	groupField?: string;
 	dateField?: string;
 	interval?: Pipes.TimeInterval;
+	year?: number;
 	stacked?: boolean;
 	horizontal?: boolean;
 } | null {
@@ -79,34 +79,35 @@ function parseChartConfig(value: string): {
 		return { type: value.toLowerCase() as Pipes.ChartType };
 	}
 
-	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^)]+))?\)$/i.exec(value.trim());
+	// Pattern baru: mendukung interval:year
+	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(value.trim());
 
 	if (!match) return null;
 
-	const [, type, firstParam, secondParam] = match;
+	const [, type, firstParam, intervalPart, yearPart] = match;
 	const chartType = type.toLowerCase() as Pipes.ChartType;
 
 	const timeIntervals = ['day', 'month', 'year'];
-	if (timeIntervals.includes(secondParam?.toLowerCase())) {
+	const interval = intervalPart?.toLowerCase().trim();
+	const year = yearPart ? parseInt(yearPart, 10) : undefined;
+
+	if (interval && timeIntervals.includes(interval)) {
 		return {
 			type: chartType,
 			dateField: firstParam.trim(),
-			interval: secondParam.toLowerCase() as Pipes.TimeInterval,
+			interval: interval as Pipes.TimeInterval,
+			year,
 		};
 	}
 
 	const options: any = { type: chartType, groupField: firstParam.trim() };
 
-	if (secondParam) {
-		const option = secondParam.toLowerCase().trim();
+	if (intervalPart) {
+		const option = intervalPart.toLowerCase().trim();
 		if (option === 'stacked') {
 			options.stacked = true;
 		} else if (option === 'horizontal') {
 			options.horizontal = true;
-		} else if (timeIntervals.includes(option)) {
-			options.dateField = firstParam.trim();
-			options.interval = option as Pipes.TimeInterval;
-			delete options.groupField;
 		}
 	}
 
@@ -385,14 +386,15 @@ function extractYearRangeFromData(
  */
 function generateTimeSeriesLabelsEnhanced(
 	interval: Pipes.TimeInterval,
-	yearRange?: { minYear: number; maxYear: number }
+	yearRange?: { minYear: number; maxYear: number },
+	specifiedYear?: number
 ): string[] {
 	const labels: string[] = [];
 	const currentYear = new Date().getFullYear();
 
 	switch (interval) {
 		case 'day': {
-			const year = yearRange?.minYear || currentYear;
+			const year = specifiedYear || yearRange?.minYear || currentYear;
 			for (let m = 0; m < 12; m++) {
 				const daysInMonth = new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
 				for (let d = 1; d <= daysInMonth; d++) {
@@ -405,7 +407,7 @@ function generateTimeSeriesLabelsEnhanced(
 		}
 
 		case 'month': {
-			const year = yearRange?.minYear || currentYear;
+			const year = specifiedYear || yearRange?.minYear || currentYear;
 			for (let i = 0; i < 12; i++) {
 				const date = new Date(Date.UTC(year, i, 1));
 				labels.push(date.toLocaleString('en-US', {
@@ -418,13 +420,18 @@ function generateTimeSeriesLabelsEnhanced(
 		}
 
 		case 'year': {
-			// FIXED: Generate dari minYear sampai maxYear dari data aktual
-			if (yearRange) {
+			if (specifiedYear) {
+				// Generate 5 tahun ke belakang dari tahun yang ditentukan
+				for (let i = 4; i >= 0; i--) {
+					labels.push((specifiedYear - i).toString());
+				}
+			} else if (yearRange) {
+				// Generate dari minYear sampai maxYear dari data aktual
 				for (let y = yearRange.minYear; y <= yearRange.maxYear; y++) {
 					labels.push(y.toString());
 				}
 			} else {
-				// Fallback: 5 tahun terakhir jika tidak ada data
+				// Fallback: 5 tahun terakhir
 				for (let i = 4; i >= 0; i--) {
 					labels.push((currentYear - i).toString());
 				}
@@ -435,7 +442,6 @@ function generateTimeSeriesLabelsEnhanced(
 
 	return labels;
 }
-
 /**
  * Parse string value to standardized format based on interval
  */
@@ -502,7 +508,6 @@ function parseStringToTimeKey(
 
 			return null;
 		}
-
 		case 'day': {
 			// Expected: "15", "2024-01-15", or Date
 			// For day interval, we need full date context
@@ -602,7 +607,11 @@ function transformToChartSeries(
 		);
 
 		// Generate labels berdasarkan data aktual
-		const timeLabels = generateTimeSeriesLabelsEnhanced(chartConfig.interval, yearRange || undefined);
+		const timeLabels = generateTimeSeriesLabelsEnhanced(
+			chartConfig.interval,
+			yearRange || undefined,
+			chartConfig.year
+		);
 
 		// GROUPED TIME SERIES
 		if (hasGrouping) {
@@ -617,7 +626,7 @@ function transformToChartSeries(
 					const timeKey = getTimeKeyEnhanced(
 						dateValue,
 						chartConfig.interval!,
-						yearRange?.minYear
+						chartConfig.year || yearRange?.minYear
 					);
 
 					if (!groupedDataMap.has(groupValue)) {
