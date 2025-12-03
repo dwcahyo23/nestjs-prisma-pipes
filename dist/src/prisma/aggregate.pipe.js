@@ -13,7 +13,29 @@ exports.manualAggregateWithRelationships = manualAggregateWithRelationships;
 exports.manualAggregateForTimeSeries = manualAggregateForTimeSeries;
 const common_1 = require("@nestjs/common");
 const parse_object_literal_1 = __importDefault(require("../helpers/parse-object-literal"));
+const timezone_service_1 = __importDefault(require("./timezone.service"));
 const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'];
+function getTimeKeyWithTimezone(date, interval) {
+    const localDate = timezone_service_1.default.utcToLocal(date);
+    switch (interval) {
+        case 'day': {
+            const year = localDate.getUTCFullYear();
+            const month = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(localDate.getUTCDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+        case 'month': {
+            const normalized = new Date(Date.UTC(localDate.getUTCFullYear(), localDate.getUTCMonth(), 1));
+            return normalized.toLocaleString('en-US', {
+                month: 'short',
+                year: 'numeric',
+                timeZone: 'UTC'
+            });
+        }
+        case 'year':
+            return localDate.getUTCFullYear().toString();
+    }
+}
 function parseAggregateFunction(value) {
     if (!value || typeof value !== 'string')
         return null;
@@ -384,15 +406,16 @@ function parseStringToTimeKey(value, interval, contextYear, contextMonth) {
 }
 function getTimeKeyEnhanced(value, interval, contextYear, contextMonth) {
     if (value instanceof Date) {
-        return getTimeKey(value, interval);
+        return getTimeKeyWithTimezone(value, interval);
     }
     const result = parseStringToTimeKey(value, interval, contextYear, contextMonth);
     if (result)
         return result;
     try {
-        const date = new Date(value);
+        const dateString = timezone_service_1.default.addTimezoneToDateString(String(value));
+        const date = new Date(dateString);
         if (!isNaN(date.getTime())) {
-            return getTimeKey(date, interval);
+            return getTimeKeyWithTimezone(date, interval);
         }
     }
     catch { }

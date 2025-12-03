@@ -5,4 +5,10 @@ import { convertFieldReferences, createFieldRefConverter } from './helpers/field
 import { IncludePipe } from './prisma/include.pipe';
 import { Pipes } from './pipes.types';
 import AggregatePipe from './prisma/aggregate.pipe';
-export { WherePipe, OrderByPipe, SelectPipe, IncludePipe, AggregatePipe, Pipes, convertFieldReferences, createFieldRefConverter };
+import TimezoneService, { TimezoneConfig } from './prisma/timezone.service';
+export declare function configurePipesTimezone(config: Partial<TimezoneConfig>): void;
+export declare function getPipesTimezone(): TimezoneConfig;
+export { WherePipe, OrderByPipe, SelectPipe, IncludePipe, AggregatePipe, convertFieldReferences, createFieldRefConverter, };
+export { Pipes };
+export type { TimezoneConfig };
+export { TimezoneService };

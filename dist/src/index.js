@@ -3,7 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createFieldRefConverter = exports.convertFieldReferences = exports.AggregatePipe = exports.IncludePipe = exports.SelectPipe = exports.OrderByPipe = exports.WherePipe = void 0;
+exports.TimezoneService = exports.createFieldRefConverter = exports.convertFieldReferences = exports.AggregatePipe = exports.IncludePipe = exports.SelectPipe = exports.OrderByPipe = exports.WherePipe = void 0;
+exports.configurePipesTimezone = configurePipesTimezone;
+exports.getPipesTimezone = getPipesTimezone;
 const where_pipe_1 = __importDefault(require("./prisma/where.pipe"));
 exports.WherePipe = where_pipe_1.default;
 const order_by_pipe_1 = __importDefault(require("./prisma/order-by.pipe"));
@@ -17,4 +19,12 @@ const include_pipe_1 = require("./prisma/include.pipe");
 Object.defineProperty(exports, "IncludePipe", { enumerable: true, get: function () { return include_pipe_1.IncludePipe; } });
 const aggregate_pipe_1 = __importDefault(require("./prisma/aggregate.pipe"));
 exports.AggregatePipe = aggregate_pipe_1.default;
+const timezone_service_1 = __importDefault(require("./prisma/timezone.service"));
+exports.TimezoneService = timezone_service_1.default;
+function configurePipesTimezone(config) {
+    timezone_service_1.default.setTimezone(config);
+}
+function getPipesTimezone() {
+    return timezone_service_1.default.getTimezone();
+}
 //# sourceMappingURL=index.js.map

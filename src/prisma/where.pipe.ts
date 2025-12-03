@@ -3,6 +3,7 @@ import parseObjectLiteral from '../helpers/parse-object-literal';
 import { Pipes } from 'src/pipes.types';
 import delimetedStringObject from '../helpers/delimeted-string-object';
 import deepMerge from '../helpers/deep-merge';
+import TimezoneService from './timezone.service';
 
 /**
  * Type definitions for better type safety
@@ -68,7 +69,12 @@ function parseStringToDate(ruleValue: string): string {
 	}
 
 	const content = extractParenthesesContent(ruleValue);
-	return content ? new Date(content).toISOString() : '';
+	if (!content) return '';
+
+	// ✅ Use TimezoneService to add timezone
+	const dateString = TimezoneService.addTimezoneToDateString(content);
+
+	return new Date(dateString).toISOString();
 }
 
 /**

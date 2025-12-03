@@ -13,6 +13,7 @@ const common_1 = require("@nestjs/common");
 const parse_object_literal_1 = __importDefault(require("../helpers/parse-object-literal"));
 const delimeted_string_object_1 = __importDefault(require("../helpers/delimeted-string-object"));
 const deep_merge_1 = __importDefault(require("../helpers/deep-merge"));
+const timezone_service_1 = __importDefault(require("./timezone.service"));
 const FILTER_OPERATORS = [
     'lt', 'lte', 'gt', 'gte', 'equals', 'not',
     'contains', 'startsWith', 'endsWith',
@@ -48,7 +49,10 @@ function parseStringToDate(ruleValue) {
         return '';
     }
     const content = extractParenthesesContent(ruleValue);
-    return content ? new Date(content).toISOString() : '';
+    if (!content)
+        return '';
+    const dateString = timezone_service_1.default.addTimezoneToDateString(content);
+    return new Date(dateString).toISOString();
 }
 function parseStringToFloat(ruleValue) {
     if (!ruleValue.endsWith(')') || !ruleValue.startsWith('float(')) {

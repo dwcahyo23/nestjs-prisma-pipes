@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
 import { Pipes } from 'src/pipes.types';
+import TimezoneService from './timezone.service';
 
 
 /**
@@ -8,6 +9,39 @@ import { Pipes } from 'src/pipes.types';
  */
 const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'] as const;
 type AggregateFunction = typeof AGGREGATE_FUNCTIONS[number];
+
+
+/**
+ * Get time key with timezone awareness
+ */
+function getTimeKeyWithTimezone(date: Date, interval: Pipes.TimeInterval): string {
+	// ✅ Use TimezoneService to convert to local
+	const localDate = TimezoneService.utcToLocal(date);
+
+	switch (interval) {
+		case 'day': {
+			const year = localDate.getUTCFullYear();
+			const month = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+			const day = String(localDate.getUTCDate()).padStart(2, '0');
+			return `${year}-${month}-${day}`;
+		}
+		case 'month': {
+			const normalized = new Date(Date.UTC(
+				localDate.getUTCFullYear(),
+				localDate.getUTCMonth(),
+				1
+			));
+			return normalized.toLocaleString('en-US', {
+				month: 'short',
+				year: 'numeric',
+				timeZone: 'UTC'
+			});
+		}
+		case 'year':
+			return localDate.getUTCFullYear().toString();
+	}
+}
+
 
 /**
  * Parse aggregate function with parameters
@@ -538,7 +572,7 @@ function parseStringToTimeKey(
 }
 
 /**
- * Enhanced getTimeKey that handles string dates
+ * Enhanced getTimeKey that handles string dates with timezone awareness
  */
 function getTimeKeyEnhanced(
 	value: Date | string | number,
@@ -546,24 +580,22 @@ function getTimeKeyEnhanced(
 	contextYear?: number,
 	contextMonth?: number
 ): string {
-	// Handle Date object
 	if (value instanceof Date) {
-		return getTimeKey(value, interval);
+		return getTimeKeyWithTimezone(value, interval);
 	}
 
-	// Handle string/number
 	const result = parseStringToTimeKey(value, interval, contextYear, contextMonth);
 	if (result) return result;
 
-	// Fallback: try to parse as date
 	try {
-		const date = new Date(value);
+		// ✅ Use TimezoneService
+		const dateString = TimezoneService.addTimezoneToDateString(String(value));
+		const date = new Date(dateString);
 		if (!isNaN(date.getTime())) {
-			return getTimeKey(date, interval);
+			return getTimeKeyWithTimezone(date, interval);
 		}
 	} catch { }
 
-	// Last resort: return as string
 	return String(value ?? 'null');
 }
 

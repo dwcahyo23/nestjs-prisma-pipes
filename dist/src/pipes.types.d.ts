@@ -1,4 +1,9 @@
 export declare namespace Pipes {
+    interface TimezoneConfig {
+        offset: string;
+        name: string;
+        offsetHours: number;
+    }
     type FilterOperator = 'lt' | 'lte' | 'gt' | 'gte' | 'equals' | 'not' | 'contains' | 'startsWith' | 'endsWith' | 'every' | 'some' | 'none' | 'in' | 'has' | 'hasEvery' | 'hasSome';
     interface FieldReference {
         _ref: string;
