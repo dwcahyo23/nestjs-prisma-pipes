@@ -8,7 +8,6 @@ import TimezoneService from './prisma/timezone.service';
 import { convertFieldReferences, createFieldRefConverter } from './helpers/field-ref-converter.helper';
 import { configurePipesTimezone, getPipesTimezone } from './helpers/timezone.config';
 import { Pipes } from './pipes.types';
-import { TimezoneConfig } from './timezone.type';
 
 
 // Export pipes
@@ -31,4 +30,3 @@ export {
 
 // Export types
 export type { Pipes };
-export type { TimezoneConfig }

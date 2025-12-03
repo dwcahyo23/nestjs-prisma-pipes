@@ -1,4 +1,27 @@
 export namespace Pipes {
+	// ============================================
+	// TIMEZONE CONFIGURATION
+	// ============================================
+
+	/**
+	 * Timezone configuration for date operations
+	 * Configure once at app initialization:
+	 * 
+	 * @example
+	 * ```typescript
+	 * import { configurePipesTimezone } from './pipes';
+	 * 
+	 * configurePipesTimezone({
+	 *   offset: '+07:00',
+	 *   name: 'Asia/Jakarta',
+	 * });
+	 * ```
+	 */
+	export interface TimezoneConfig {
+		offset: string;      // e.g., '+07:00'
+		name: string;        // e.g., 'Asia/Jakarta'
+		offsetHours: number; // e.g., 7
+	}
 
 	// ============================================
 	// WHERE PIPE TYPES

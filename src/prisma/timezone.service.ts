@@ -1,14 +1,8 @@
-// pipes/config/timezone.service.ts
-
-export interface TimezoneConfig {
-	offset: string;      // e.g., '+07:00'
-	name: string;        // e.g., 'Asia/Jakarta'
-	offsetHours: number; // e.g., 7
-}
+import { Pipes } from 'src/pipes.types';
 
 class TimezoneService {
 	private static instance: TimezoneService;
-	private config: TimezoneConfig = {
+	private config: Pipes.TimezoneConfig = {
 		offset: '+00:00',
 		name: 'UTC',
 		offsetHours: 0,
@@ -26,7 +20,7 @@ class TimezoneService {
 	/**
 	 * Set timezone configuration
 	 */
-	setTimezone(config: Partial<TimezoneConfig>): void {
+	setTimezone(config: Partial<Pipes.TimezoneConfig>): void {
 		if (config.offset) {
 			this.config.offset = config.offset;
 			// Auto-calculate offsetHours from offset string
@@ -43,7 +37,7 @@ class TimezoneService {
 	/**
 	 * Get current timezone configuration
 	 */
-	getTimezone(): TimezoneConfig {
+	getTimezone(): Pipes.TimezoneConfig {
 		return { ...this.config };
 	}
 
