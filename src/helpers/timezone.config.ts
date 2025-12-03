@@ -1,5 +1,6 @@
-import TimezoneService, { TimezoneConfig } from "../prisma/timezone.service";
-
+// src/helpers/timezone.config.ts
+import TimezoneService from '../prisma/timezone.service';
+import { TimezoneConfig } from '../timezone.type';
 
 /**
  * Configure timezone for all pipes
@@ -7,7 +8,7 @@ import TimezoneService, { TimezoneConfig } from "../prisma/timezone.service";
  * 
  * @example
  * ```typescript
- * import { configurePipesTimezone } from './pipes';
+ * import { configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
  * 
  * configurePipesTimezone({
  *   offset: '+07:00',
@@ -24,7 +25,7 @@ export function configurePipesTimezone(config: Partial<TimezoneConfig>): void {
  * 
  * @example
  * ```typescript
- * import { getPipesTimezone } from './pipes';
+ * import { getPipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
  * 
  * const timezone = getPipesTimezone();
  * console.log(timezone); // { offset: '+07:00', name: 'Asia/Jakarta', offsetHours: 7 }
