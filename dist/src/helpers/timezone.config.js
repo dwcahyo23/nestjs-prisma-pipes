@@ -1,12 +1,15 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.configurePipesTimezone = configurePipesTimezone;
 exports.getPipesTimezone = getPipesTimezone;
-const src_1 = require("src");
+const timezone_service_1 = __importDefault(require("../prisma/timezone.service"));
 function configurePipesTimezone(config) {
-    src_1.TimezoneService.setTimezone(config);
+    timezone_service_1.default.setTimezone(config);
 }
 function getPipesTimezone() {
-    return src_1.TimezoneService.getTimezone();
+    return timezone_service_1.default.getTimezone();
 }
 //# sourceMappingURL=timezone.config.js.map

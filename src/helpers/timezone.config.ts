@@ -1,4 +1,5 @@
-import { TimezoneConfig, TimezoneService } from "src";
+import TimezoneService, { TimezoneConfig } from "../prisma/timezone.service";
+
 
 /**
  * Configure timezone for all pipes
