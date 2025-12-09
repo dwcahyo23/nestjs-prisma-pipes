@@ -1,6 +1,6 @@
 {
 	"name": "@dwcahyo/nestjs-prisma-pipes",
-	"version": "2.4.7",
+	"version": "2.4.8",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -11,7 +11,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "tsc",
+		"build": "tsc -p tsconfig.build.json",
 		"test": "jest",
 		"test:watch": "jest --watch",
 		"prepublishOnly": "npm run build",

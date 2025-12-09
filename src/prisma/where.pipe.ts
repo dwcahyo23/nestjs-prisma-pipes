@@ -35,7 +35,7 @@ const TYPE_PARSERS: Record<string, (value: string) => ParsedValue> = {
 	boolean: parseStringToBoolean,
 	bool: parseStringToBoolean,
 	array: parseStringToArray,
-	field: parseFieldReference, // NEW: field reference
+	field: parseFieldReference,
 };
 
 /**
@@ -134,8 +134,17 @@ function parseStringToArray(ruleValue: string): PrimitiveValue[] {
 
 /**
  * Parse field reference for field-to-field comparison
- * @example field(recQty) → { _ref: 'recQty', _isFieldRef: true }
- * @example field(user.balance) → { _ref: 'user.balance', _isFieldRef: true }
+ * 
+ * @example 
+ * Simple field: field(recQty) → { _ref: 'recQty', _isFieldRef: true }
+ * 
+ * @example
+ * Nested relation field: field(user.balance) → { _ref: 'user.balance', _isFieldRef: true }
+ * 
+ * @example
+ * Cross-table comparison (NEW):
+ * field($parent.createdAt) → { _ref: '$parent.createdAt', _isFieldRef: true, _scope: 'parent' }
+ * field($root.orderDate) → { _ref: '$root.orderDate', _isFieldRef: true, _scope: 'root' }
  */
 function parseFieldReference(ruleValue: string): Record<string, any> {
 	if (!ruleValue.startsWith('field(') || !ruleValue.endsWith(')')) {
@@ -147,9 +156,29 @@ function parseFieldReference(ruleValue: string): Record<string, any> {
 		return {};
 	}
 
+	// Check for special scope markers
+	let scope: string | undefined;
+	let cleanPath = fieldPath;
+
+	if (fieldPath.startsWith('$parent.')) {
+		scope = 'parent';
+		cleanPath = fieldPath.substring(8); // Remove '$parent.'
+	} else if (fieldPath.startsWith('$root.')) {
+		scope = 'root';
+		cleanPath = fieldPath.substring(6); // Remove '$root.'
+	}
+
 	// Return a special object that marks this as a field reference
-	// The service layer will need to convert this to prisma.[model].fields.[fieldName]
-	return { _ref: fieldPath, _isFieldRef: true };
+	const result: Record<string, any> = {
+		_ref: cleanPath,
+		_isFieldRef: true
+	};
+
+	if (scope) {
+		result._scope = scope;
+	}
+
+	return result;
 }
 
 /**
@@ -204,11 +233,35 @@ function extractOperatorAndValue(ruleValue: string): { operator: string | null; 
 }
 
 /**
- * @description Convert a string like
- * @example "id: int(1), firstName: banana" to { id: 1, firstName: "banana" }
- * @example "createdAt: gte date(2024-01-01), createdAt: lte date(2024-12-31)" 
- *          to { createdAt: { gte: "2024-01-01T00:00:00.000Z", lte: "2024-12-31T00:00:00.000Z" } }
- * @example "qty: lte field(recQty)" to { qty: { lte: "recQty" } } // Field-to-field comparison
+ * @description Convert a string with field-to-field comparison support
+ * 
+ * @example Basic comparison
+ * "id: int(1), firstName: banana" → { id: 1, firstName: "banana" }
+ * 
+ * @example Date range
+ * "createdAt: gte date(2024-01-01), createdAt: lte date(2024-12-31)" 
+ * → { createdAt: { gte: "2024-01-01T00:00:00.000Z", lte: "2024-12-31T00:00:00.000Z" } }
+ * 
+ * @example Same-table field comparison
+ * "qty: lte field(recQty)" → { qty: { lte: { _ref: "recQty", _isFieldRef: true } } }
+ * 
+ * @example Cross-table comparison (NEW)
+ * "mesin.some.userMesin.some.createdAt: lte field($parent.createdAt)"
+ * → {
+ *     mesin: {
+ *       some: {
+ *         userMesin: {
+ *           some: {
+ *             createdAt: { 
+ *               lte: { _ref: "createdAt", _isFieldRef: true, _scope: "parent" } 
+ *             }
+ *           }
+ *         }
+ *       }
+ *     }
+ *   }
+ * 
+ * This enables: userMesin.createdAt <= workorder.createdAt
  */
 @Injectable()
 export default class WherePipe implements PipeTransform {

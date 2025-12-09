@@ -49,11 +49,29 @@ export namespace Pipes {
 		| 'hasSome';
 
 	/**
+	 * Field reference scope for cross-table comparison
+	 */
+	export type FieldRefScope = 'parent' | 'root';
+
+	/**
 	 * Field reference object for field-to-field comparison
+	 * 
+	 * @example
+	 * // Same table reference
+	 * { _ref: 'recQty', _isFieldRef: true }
+	 * 
+	 * @example
+	 * // Parent table reference
+	 * { _ref: 'createdAt', _isFieldRef: true, _scope: 'parent' }
+	 * 
+	 * @example
+	 * // Root table reference
+	 * { _ref: 'orderDate', _isFieldRef: true, _scope: 'root' }
 	 */
 	export interface FieldReference {
 		_ref: string;
 		_isFieldRef: true;
+		_scope?: FieldRefScope;
 	}
 
 	/**
@@ -79,6 +97,62 @@ export namespace Pipes {
 		OR?: Where[];
 		NOT?: Where | Where[];
 	};
+
+	// ============================================
+	// FIELD REFERENCE HELPER TYPES
+	// ============================================
+
+	/**
+	 * Context for field reference resolution
+	 */
+	export interface FieldRefContext {
+		/** Current model being queried */
+		currentModel: string;
+		/** Parent model context (1 level up) */
+		parentModel?: string;
+		/** Parent model fields */
+		parentFields?: any;
+		/** Root model context (top level) */
+		rootModel?: string;
+		/** Root model fields */
+		rootFields?: any;
+	}
+
+	/**
+	 * Options for field reference converter
+	 */
+	export interface FieldRefConverterOptions {
+		/** Enable debug logging */
+		debug?: boolean;
+		/** Throw error on unresolved field references */
+		strict?: boolean;
+		/** Custom field resolver function */
+		customResolver?: (
+			ref: string,
+			scope: FieldRefScope | undefined,
+			context: FieldRefContext
+		) => any;
+	}
+
+	/**
+	 * Field reference validation result
+	 */
+	export interface FieldRefValidationResult {
+		valid: boolean;
+		errors: string[];
+		warnings: string[];
+	}
+
+	/**
+	 * Extracted field reference information
+	 */
+	export interface ExtractedFieldRef {
+		path: string;
+		ref: string;
+		scope?: FieldRefScope;
+		context: string;
+	}
+
 
 	// ============================================
 	// ORDER BY PIPE TYPES
