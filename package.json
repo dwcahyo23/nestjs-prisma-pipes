@@ -8,14 +8,23 @@
 	"main": "dist/src/index.js",
 	"types": "dist/src/index.d.ts",
 	"files": [
-		"dist"
+		"dist",
+		"README.md",
+		"LICENSE"
 	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"require": "./dist/index.js",
+			"import": "./dist/index.js"
+		}
+	},
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json",
-		"test": "jest",
-		"test:watch": "jest --watch",
+		"clean": "rm -rf dist",
+		"build": "npm run clean && tsc -p tsconfig.build.json",
 		"prepublishOnly": "npm run build",
-		"test:aggregate": "jest --testPathPattern=aggregate --silent --bail --verbose=false"
+		"test": "jest",
+		"test:watch": "jest --watch"
 	},
 	"repository": {
 		"type": "git",
@@ -26,7 +35,8 @@
 		"pipes",
 		"prisma",
 		"wherepipe",
-		"orderby"
+		"orderby",
+		"typescript"
 	],
 	"author": "Yusuf Dwi",
 	"license": "MIT",
