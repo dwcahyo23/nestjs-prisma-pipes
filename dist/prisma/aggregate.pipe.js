@@ -239,98 +239,107 @@ function getNestedValue(obj, path) {
     }
     return value;
 }
-/**
- * ✅ UPDATED: Extract display value from nested object
- * Now properly navigates multi-level nested structures
- */
 function extractDisplayValue(value, fieldPath) {
     if (value === null || value === undefined) {
         return 'null';
     }
-    // If it's a primitive, return as string
     if (typeof value !== 'object') {
         return String(value);
     }
-    // If it's a Date, format it
     if (value instanceof Date) {
         return getTimeKey(value, 'day');
     }
-    // ✅ PRIORITY 1: If fieldPath is provided, extract the last field name
-    // Example: "productionEmployeePerformanceMachine.machine.mcCode" → extract "mcCode"
-    if (fieldPath) {
+    // ✅ NAVIGATE FULL PATH
+    if (fieldPath && fieldPath.includes('.')) {
         const pathParts = fieldPath.split('.');
-        const lastField = pathParts[pathParts.length - 1];
-        // Navigate through the object to find the value
         let current = value;
-        for (let i = 0; i < pathParts.length && current != null; i++) {
-            // Skip if we're already at the right level
-            if (current[lastField] !== undefined && current[lastField] !== null) {
-                return String(current[lastField]);
-            }
-            current = current[pathParts[i]];
+        for (const part of pathParts) {
+            if (current == null)
+                return 'null';
+            current = current[part];
+            if (Array.isArray(current))
+                return 'null';
         }
-        // If we found the final value after navigation
-        if (current !== undefined && current !== null && typeof current !== 'object') {
-            return String(current);
+        if (current !== undefined && current !== null) {
+            if (typeof current !== 'object') {
+                return String(current);
+            }
+            if (current instanceof Date) {
+                return getTimeKey(current, 'day');
+            }
         }
     }
-    // ✅ PRIORITY 2: Try to extract from nested structure
-    // Walk through the object to find the first non-object value
+    // Fallback logic...
     let current = value;
-    while (current != null && typeof current === 'object' && !Array.isArray(current)) {
+    let depth = 0;
+    while (current != null && typeof current === 'object' && !Array.isArray(current) && !(current instanceof Date) && depth < 10) {
         const keys = Object.keys(current).filter(k => !k.startsWith('_'));
         if (keys.length === 0)
             break;
-        // If there's only one key, go deeper
         if (keys.length === 1) {
             current = current[keys[0]];
+            depth++;
         }
         else {
-            // Multiple keys - can't determine which to use
             break;
         }
     }
-    // If we found a primitive value
     if (current !== value && typeof current !== 'object') {
         return String(current);
     }
-    // ✅ PRIORITY 3: Fallback to JSON representation
     return JSON.stringify(value);
 }
-/**
- * ✅ NEW: Flatten array relationships for grouping
- * Converts: { productionEmployeePerformanceLeaders: [{ leaderNik: 'A' }, { leaderNik: 'B' }] }
- * Into multiple records, one per leader
- */
 function flattenArrayRelationships(data, groupByFields) {
-    const arrayFields = groupByFields.filter(field => field.includes('.'));
-    if (arrayFields.length === 0) {
+    const relationFields = groupByFields.filter(field => field.includes('.'));
+    if (relationFields.length === 0) {
         return data;
     }
     const flattened = [];
     for (const item of data) {
-        // Find which groupBy field is an array relationship
-        const arrayRelationField = arrayFields.find(field => {
-            const relationName = field.split('.')[0];
-            const value = item[relationName];
-            return Array.isArray(value);
-        });
-        if (arrayRelationField) {
-            const relationName = arrayRelationField.split('.')[0];
-            const arrayValue = item[relationName];
-            if (Array.isArray(arrayValue) && arrayValue.length > 0) {
-                // Create one record per array item
+        let foundArray = false;
+        let arrayField = null;
+        let arrayValue = null;
+        for (const field of relationFields) {
+            const parts = field.split('.');
+            let current = item;
+            for (let i = 0; i < parts.length; i++) {
+                if (current == null)
+                    break;
+                const part = parts[i];
+                current = current[part];
+                if (Array.isArray(current)) {
+                    foundArray = true;
+                    arrayField = parts.slice(0, i + 1).join('.');
+                    arrayValue = current;
+                    break;
+                }
+            }
+            if (foundArray)
+                break;
+        }
+        if (foundArray && arrayField && arrayValue) {
+            if (arrayValue.length > 0) {
                 for (const arrayItem of arrayValue) {
-                    const flattenedItem = { ...item };
-                    // Replace array with single item
-                    flattenedItem[relationName] = arrayItem;
+                    const flattenedItem = JSON.parse(JSON.stringify(item)); // Deep clone
+                    const pathParts = arrayField.split('.');
+                    let current = flattenedItem;
+                    for (let i = 0; i < pathParts.length - 1; i++) {
+                        current = current[pathParts[i]];
+                    }
+                    const lastPart = pathParts[pathParts.length - 1];
+                    current[lastPart] = arrayItem;
                     flattened.push(flattenedItem);
                 }
             }
             else {
-                // No array items, skip or keep as null
-                const flattenedItem = { ...item };
-                flattenedItem[relationName] = null;
+                const flattenedItem = JSON.parse(JSON.stringify(item));
+                const pathParts = arrayField.split('.');
+                let current = flattenedItem;
+                for (let i = 0; i < pathParts.length - 1; i++) {
+                    current = current[pathParts[i]];
+                }
+                const lastPart = pathParts[pathParts.length - 1];
+                current[lastPart] = null;
                 flattened.push(flattenedItem);
             }
         }
