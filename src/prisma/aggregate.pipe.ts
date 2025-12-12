@@ -131,6 +131,9 @@ function hasRelationshipInGroupBy(groupBy: string[]): boolean {
  * ✅ UPDATED: Parse chart configuration with all chart types
  * Supports: bar, line, pie, scatter, area, heatmap, radar, funnel, gauge, mixed, donut
  */
+/**
+ * ✅ FIXED: Parse chart configuration
+ */
 function parseChartConfig(value: string): {
 	type: Pipes.ChartType;
 	groupField?: string;
@@ -142,39 +145,24 @@ function parseChartConfig(value: string): {
 } | null {
 	if (!value || typeof value !== 'string') return null;
 
-	// ✅ Updated: All supported chart types
-	const chartTypes: Pipes.ChartType[] = [
-		'bar',
-		'line',
-		'pie',
-		'scatter',
-		'area',
-		'heatmap',
-		'radar',
-		'funnel',
-		'gauge',
-		'mixed',
-		'donut'
-	];
-
+	const chartTypes: Pipes.ChartType[] = ['bar', 'line', 'pie', 'area', 'donut'];
 	const trimmedValue = value.toLowerCase().trim();
 
-	// Check 1: Handle chart type without parentheses
-	// Example: chart:bar, chart:radar
+	// ✅ FIX 1: Handle chart type without parentheses
+	// Example: chart:bar, chart:pie
 	if (chartTypes.includes(trimmedValue as Pipes.ChartType)) {
 		return { type: trimmedValue as Pipes.ChartType };
 	}
 
-	// Check 2: Handle chart type with empty parentheses
-	// Example: chart:bar(), chart:radar()
-	const emptyParenMatch = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(\s*\)$/i.exec(trimmedValue);
+	// ✅ FIX 2: Handle chart type with empty parentheses
+	// Example: chart:bar(), chart:pie(), chart:line()
+	const emptyParenMatch = /^(bar|line|pie|area|donut)\(\s*\)$/i.exec(trimmedValue);
 	if (emptyParenMatch) {
 		return { type: emptyParenMatch[1].toLowerCase() as Pipes.ChartType };
 	}
 
-	// Check 3: Parse chart with parameters
-	// Pattern: type(param1) or type(param1, param2) or type(param1, param2:value)
-	const match = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
+	// ✅ FIX 3: Parse chart with parameters (existing logic)
+	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
 
 	if (!match) return null;
 
@@ -185,7 +173,6 @@ function parseChartConfig(value: string): {
 	const interval = intervalPart?.toLowerCase().trim();
 	const year = yearPart ? parseInt(yearPart, 10) : undefined;
 
-	// Time series chart
 	if (interval && timeIntervals.includes(interval)) {
 		return {
 			type: chartType,
@@ -195,10 +182,8 @@ function parseChartConfig(value: string): {
 		};
 	}
 
-	// Regular chart with groupField
 	const options: any = { type: chartType, groupField: firstParam.trim() };
 
-	// Handle additional options (stacked, horizontal)
 	if (intervalPart) {
 		const option = intervalPart.toLowerCase().trim();
 		if (option === 'stacked') {
