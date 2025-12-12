@@ -1162,7 +1162,7 @@ class AggregatePipe {
         if (!aggregateConfig.isGrouped) {
             if (!data || (Array.isArray(data) && data.length === 0)) {
                 const series = aggregateConfig.aggregates.map((agg) => ({
-                    name: `${agg.function}(${agg.field})`,
+                    name: getSeriesName(agg), // ✅ Use helper with alias
                     data: [0],
                 }));
                 return {
@@ -1176,7 +1176,7 @@ class AggregatePipe {
             }
             const series = aggregateConfig.aggregates.map((agg) => {
                 const { function: func, field } = agg;
-                const seriesName = `${func}(${field})`;
+                const seriesName = getSeriesName(agg);
                 let dataValue = 0;
                 if (func === 'count') {
                     if (typeof data._count === 'number') {

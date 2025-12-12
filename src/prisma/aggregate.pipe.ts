@@ -1439,7 +1439,7 @@ export default class AggregatePipe implements PipeTransform {
 		if (!aggregateConfig.isGrouped) {
 			if (!data || (Array.isArray(data) && data.length === 0)) {
 				const series = aggregateConfig.aggregates.map((agg: Pipes.AggregateSpec) => ({
-					name: `${agg.function}(${agg.field})`,
+					name: getSeriesName(agg), // ✅ Use helper with alias
 					data: [0],
 				}));
 
@@ -1455,7 +1455,7 @@ export default class AggregatePipe implements PipeTransform {
 
 			const series = aggregateConfig.aggregates.map((agg: Pipes.AggregateSpec) => {
 				const { function: func, field } = agg;
-				const seriesName = `${func}(${field})`;
+				const seriesName = getSeriesName(agg);
 
 				let dataValue = 0;
 				if (func === 'count') {
