@@ -115,21 +115,32 @@ function hasRelationshipInGroupBy(groupBy) {
 function parseChartConfig(value) {
     if (!value || typeof value !== 'string')
         return null;
-    const chartTypes = ['bar', 'line', 'pie', 'area', 'donut'];
+    // ✅ All 11 chart types
+    const chartTypes = [
+        'bar',
+        'line',
+        'pie',
+        'scatter',
+        'area',
+        'heatmap',
+        'radar',
+        'funnel',
+        'gauge',
+        'mixed',
+        'donut'
+    ];
     const trimmedValue = value.toLowerCase().trim();
-    // ✅ FIX 1: Handle chart type without parentheses
-    // Example: chart:bar, chart:pie
+    // Check 1: Without parentheses
     if (chartTypes.includes(trimmedValue)) {
         return { type: trimmedValue };
     }
-    // ✅ FIX 2: Handle chart type with empty parentheses
-    // Example: chart:bar(), chart:pie(), chart:line()
-    const emptyParenMatch = /^(bar|line|pie|area|donut)\(\s*\)$/i.exec(trimmedValue);
+    // Check 2: Empty parentheses
+    const emptyParenMatch = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(\s*\)$/i.exec(trimmedValue);
     if (emptyParenMatch) {
         return { type: emptyParenMatch[1].toLowerCase() };
     }
-    // ✅ FIX 3: Parse chart with parameters (existing logic)
-    const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
+    // Check 3: With parameters
+    const match = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
     if (!match)
         return null;
     const [, type, firstParam, intervalPart, yearPart] = match;
@@ -137,6 +148,7 @@ function parseChartConfig(value) {
     const timeIntervals = ['day', 'month', 'year'];
     const interval = intervalPart?.toLowerCase().trim();
     const year = yearPart ? parseInt(yearPart, 10) : undefined;
+    // Time series
     if (interval && timeIntervals.includes(interval)) {
         return {
             type: chartType,
@@ -145,7 +157,9 @@ function parseChartConfig(value) {
             year,
         };
     }
+    // Regular chart with groupField
     const options = { type: chartType, groupField: firstParam.trim() };
+    // Additional options
     if (intervalPart) {
         const option = intervalPart.toLowerCase().trim();
         if (option === 'stacked') {
@@ -276,56 +290,34 @@ function extractDisplayValue(value, fieldPath) {
     return JSON.stringify(value);
 }
 function flattenArrayRelationships(data, groupByFields) {
-    const relationFields = groupByFields.filter(field => field.includes('.'));
-    if (relationFields.length === 0) {
+    const arrayFields = groupByFields.filter(field => field.includes('.'));
+    if (arrayFields.length === 0) {
         return data;
     }
     const flattened = [];
     for (const item of data) {
-        let foundArray = false;
-        let arrayField = null;
-        let arrayValue = null;
-        for (const field of relationFields) {
-            const parts = field.split('.');
-            let current = item;
-            for (let i = 0; i < parts.length; i++) {
-                if (current == null)
-                    break;
-                const part = parts[i];
-                current = current[part];
-                if (Array.isArray(current)) {
-                    foundArray = true;
-                    arrayField = parts.slice(0, i + 1).join('.');
-                    arrayValue = current;
-                    break;
-                }
-            }
-            if (foundArray)
-                break;
-        }
-        if (foundArray && arrayField && arrayValue) {
-            if (arrayValue.length > 0) {
+        // Find which groupBy field is an array relationship
+        const arrayRelationField = arrayFields.find(field => {
+            const relationName = field.split('.')[0];
+            const value = item[relationName];
+            return Array.isArray(value);
+        });
+        if (arrayRelationField) {
+            const relationName = arrayRelationField.split('.')[0];
+            const arrayValue = item[relationName];
+            if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+                // Create one record per array item
                 for (const arrayItem of arrayValue) {
-                    const flattenedItem = JSON.parse(JSON.stringify(item)); // Deep clone
-                    const pathParts = arrayField.split('.');
-                    let current = flattenedItem;
-                    for (let i = 0; i < pathParts.length - 1; i++) {
-                        current = current[pathParts[i]];
-                    }
-                    const lastPart = pathParts[pathParts.length - 1];
-                    current[lastPart] = arrayItem;
+                    const flattenedItem = { ...item };
+                    // Replace array with single item
+                    flattenedItem[relationName] = arrayItem;
                     flattened.push(flattenedItem);
                 }
             }
             else {
-                const flattenedItem = JSON.parse(JSON.stringify(item));
-                const pathParts = arrayField.split('.');
-                let current = flattenedItem;
-                for (let i = 0; i < pathParts.length - 1; i++) {
-                    current = current[pathParts[i]];
-                }
-                const lastPart = pathParts[pathParts.length - 1];
-                current[lastPart] = null;
+                // No array items, skip or keep as null
+                const flattenedItem = { ...item };
+                flattenedItem[relationName] = null;
                 flattened.push(flattenedItem);
             }
         }
