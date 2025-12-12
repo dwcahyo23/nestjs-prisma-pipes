@@ -340,6 +340,7 @@ describe('ProductController', () => {
 
 | Version | Feature | Details |
 |---------|---------|---------|
+| **2.4.14** | BUG FIX |Fix some bug |
 | **2.4.11** | Many-to-Many | Pivot table aggregation |
 | **2.4.10** | Timezone | Global timezone config |
 | **2.4.6** | Relationships | Nested field grouping |

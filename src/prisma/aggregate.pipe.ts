@@ -204,8 +204,12 @@ function getTimeKey(date: Date | string, interval: Pipes.TimeInterval): string {
 }
 
 
+// ============================================
+// BUG FIX 2: Get nested value properly for chart categories
+// ============================================
+
 /**
- * Get nested property value - FIXED untuk array relationships
+ * Get nested property value - FIXED untuk chart categories
  */
 function getNestedValue(obj: any, path: string): any {
 	const keys = path.split('.');
@@ -215,11 +219,9 @@ function getNestedValue(obj: any, path: string): any {
 		if (value == null) return null;
 		value = value[key];
 
-		// ✅ NEW: Handle array relationships
+		// Handle array relationships
 		if (Array.isArray(value)) {
-			// For pivot tables, we need to flatten the array
-			// Example: productionEmployeePerformanceLeaders[].leaderNik
-			return null; // Will be handled specially in manual aggregation
+			return null;
 		}
 	}
 
@@ -227,18 +229,36 @@ function getNestedValue(obj: any, path: string): any {
 }
 
 /**
- * ✅ NEW: Detect if a field path is an array relationship
+ * ✅ NEW: Extract display value from nested object
+ * Handles cases like: { machine: { mcCode: "BF-08414" } } → "BF-08414"
  */
-function isArrayRelationship(path: string, prismaModel: any): boolean {
-	// Check if this is a known array relationship pattern
-	// This would need to be enhanced based on your schema
-	const arrayRelationPatterns = [
-		'productionEmployeePerformanceLeaders',
-		'productionEmployeePerformanceMachine',
-		// Add other array relationships here
-	];
+function extractDisplayValue(value: any): string {
+	if (value === null || value === undefined) {
+		return 'null';
+	}
 
-	return arrayRelationPatterns.some(pattern => path.includes(pattern));
+	// If it's a primitive, return as string
+	if (typeof value !== 'object') {
+		return String(value);
+	}
+
+	// If it's a Date, format it
+	if (value instanceof Date) {
+		return getTimeKey(value, 'day');
+	}
+
+	// ✅ FIX: If it's an object, try to find a display field
+	// Common display fields in order of preference
+	const displayFields = ['mcCode', 'code', 'name', 'id', 'nik', 'title'];
+
+	for (const field of displayFields) {
+		if (value[field] !== undefined && value[field] !== null) {
+			return String(value[field]);
+		}
+	}
+
+	// If no display field found, stringify the object
+	return JSON.stringify(value);
 }
 
 /**
@@ -602,8 +622,12 @@ function detectDateFieldType(value: any): 'date' | 'year' | 'month' | 'day' | 'u
 	return 'unknown';
 }
 
+// ============================================
+// BUG FIX 1: Extract year from data properly
+// ============================================
+
 /**
- * Extract year range from actual data
+ * Extract year range from actual data - FIXED
  */
 function extractYearRangeFromData(
 	dataArray: any[],
@@ -621,7 +645,13 @@ function extractYearRangeFromData(
 		const str = String(value).trim();
 		let year: number | null = null;
 
-		if (/^\d{4}$/.test(str)) {
+		// ✅ FIX: Handle "Dec 2025" format
+		if (/^[A-Za-z]{3}\s\d{4}$/.test(str)) {
+			const yearMatch = str.match(/\d{4}$/);
+			if (yearMatch) {
+				year = parseInt(yearMatch[0], 10);
+			}
+		} else if (/^\d{4}$/.test(str)) {
 			year = parseInt(str, 10);
 		} else {
 			try {
@@ -814,9 +844,10 @@ function getTimeKeyEnhanced(
 	return String(value ?? 'null');
 }
 
-/**
- * Transform data to chart series format
- */
+// ============================================
+// UPDATED: transformToChartSeries with fixes
+// ============================================
+
 function transformToChartSeries(
 	data: any[],
 	aggregates: Pipes.AggregateSpec[],
@@ -842,19 +873,19 @@ function transformToChartSeries(
 		};
 	}
 
-	// TIME SERIES CHART - ENHANCED
+	// TIME SERIES CHART - FIXED
 	if (chartConfig?.dateField && chartConfig?.interval) {
 		const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
 		const hasGrouping = nonDateGroupFields.length > 0;
 
-		// Extract year range dari data aktual
+		// ✅ FIX 1: Extract year range dari data aktual
 		const yearRange = extractYearRangeFromData(
 			dataArray,
 			chartConfig.dateField,
 			chartConfig.interval
 		);
 
-		// Generate labels berdasarkan data aktual
+		// ✅ FIX 1: Generate labels berdasarkan year range dari data, bukan current year
 		const timeLabels = generateTimeSeriesLabelsEnhanced(
 			chartConfig.interval,
 			yearRange || undefined,
@@ -868,7 +899,7 @@ function transformToChartSeries(
 
 			dataArray.forEach(item => {
 				const dateValue = getNestedValue(item, chartConfig.dateField!);
-				const groupValue = String(getNestedValue(item, groupField) ?? 'null');
+				const groupValue = extractDisplayValue(getNestedValue(item, groupField)); // ✅ FIX 2
 
 				if (dateValue) {
 					const timeKey = getTimeKeyEnhanced(
@@ -983,16 +1014,14 @@ function transformToChartSeries(
 		};
 	}
 
-	// GROUPED (non-time-series) CHART
+	// GROUPED (non-time-series) CHART - FIXED
 	if (groupBy && groupBy.length > 0) {
 		const categoryField = chartConfig?.groupField || groupBy[0];
 
+		// ✅ FIX 2: Extract display values properly
 		const categories = dataArray.map(item => {
 			const val = getNestedValue(item, categoryField);
-			if (val instanceof Date) {
-				return getTimeKey(val, 'day');
-			}
-			return String(val ?? 'null');
+			return extractDisplayValue(val);
 		});
 
 		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
@@ -1279,15 +1308,9 @@ export default class AggregatePipe implements PipeTransform {
 				aggregateConfig.groupBy,
 				aggregateConfig.chartConfig.dateField,
 				aggregateConfig.chartConfig.interval!,
-				aggregateConfig.chartConfig.year, // ✅ Pass year parameter
+				aggregateConfig.chartConfig.year,
 				where
 			);
-
-			// // ✅ DEBUG: Log untuk memverifikasi data
-			// console.log('Execute result count:', result.length);
-			// if (result.length > 0) {
-			// 	console.log('Sample data:', result[0]);
-			// }
 
 			return result;
 		}

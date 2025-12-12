@@ -1,4 +1,29 @@
 
+## [2.4.14] - 2025
+
+### BUG - Fixes
+BUG 1 FIX: Time series showing wrong year
+- Problem: generateTimeSeriesLabelsEnhanced used new Date().getFullYear() 
+  instead of year from actual data
+- Solution: extractYearRangeFromData now properly extracts year from "Dec 2025" format
+  and passes it to generateTimeSeriesLabelsEnhanced
+
+BUG 2 FIX: Categories showing "null" for nested relationships
+- Problem: getNestedValue returns object { mcCode: "BF-08414" } which becomes "null" 
+  when converted to string
+- Solution: New extractDisplayValue() function that:
+  1. Checks common display fields (mcCode, code, name, id, nik, title)
+  2. Returns the first non-null field value
+  3. Falls back to JSON.stringify if no display field found
+
+TESTING:
+Query 1: aggregate: s: avg(), p: avg(), pd: avg(), groupBy: (date), chart: line(date, month)
+Expected: Categories should show "Jan 2025", "Feb 2025", etc. (NOT 2024)
+
+Query 2: output: sum(), plan: sum(), groupBy: (productionEmployeePerformanceMachine.machine.mcCode), 
+         chart: bar(productionEmployeePerformanceMachine.machine.mcCode)
+Expected: Categories should show "BF-08414", "BF-08301", etc. (NOT "null")
+
 ## [2.4.11] - 2025
 
 ### 🔗 Added - Many-to-Many Pivot Table Aggregation Support
@@ -261,6 +286,7 @@ GET /api/products?filter=category.name:electronics
 
 | Version | Feature | Description |
 |---------|---------|-------------|
+| **2.4.14** | BUG FIX |Fix some bug |
 | **2.4.11** | Many-to-Many | Pivot table aggregation |
 | **2.4.10** | Timezone | Global timezone config |
 | **2.4.6** | Relationships | Nested field grouping + year params |
