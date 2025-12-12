@@ -9,7 +9,7 @@ declare function manualAggregateWithRelationships(prismaModel: any, aggregates: 
  */
 declare function manualAggregateForTimeSeries(prismaModel: any, aggregates: Pipes.AggregateSpec[], groupBy: string[], dateField: string, interval: Pipes.TimeInterval, year: number | undefined, where?: any): Promise<any[]>;
 /**
- * Aggregate Pipe
+ * ✅ CRITICAL FIX: Update AggregatePipe transform to properly store alias
  */
 export default class AggregatePipe implements PipeTransform {
     transform(value: string): Pipes.Aggregate | undefined;

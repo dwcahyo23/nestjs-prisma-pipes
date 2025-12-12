@@ -1,10 +1,4 @@
 "use strict";
-var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
-    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
-    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
-    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
-    return c > 3 && r && Object.defineProperty(target, key, r), r;
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -43,24 +37,36 @@ function getTimeKeyWithTimezone(date, interval) {
     }
 }
 /**
- * Parse aggregate function with parameters and alias support
- * Supports formats:
- * - sum()
- * - sum():alias(Total Revenue)
- * - avg(price):alias(Average Price)
+ * ✅ FIXED: Parse aggregate function with alias support
+ * Now handles nested relationships correctly
  */
 function parseAggregateFunction(value) {
     if (!value || typeof value !== 'string')
         return null;
-    // Split by :alias() if exists
-    const aliasSplit = value.split(':alias(');
-    let funcPart = aliasSplit[0].trim();
+    // ✅ FIX: Split by :alias( more carefully
+    // Handle cases where field might contain dots (relationships)
+    const aliasPattern = /:alias\s*\(/i;
+    const aliasIndex = value.search(aliasPattern);
+    let funcPart = value.trim();
     let alias;
-    // Extract alias if provided
-    if (aliasSplit.length > 1) {
-        const aliasMatch = aliasSplit[1].match(/^([^)]+)\)/);
-        if (aliasMatch) {
-            alias = aliasMatch[1].trim();
+    if (aliasIndex !== -1) {
+        funcPart = value.substring(0, aliasIndex).trim();
+        // Extract alias content between parentheses
+        const aliasStartIndex = value.indexOf('(', aliasIndex);
+        if (aliasStartIndex !== -1) {
+            let parenCount = 1;
+            let aliasEndIndex = aliasStartIndex + 1;
+            // Find matching closing parenthesis
+            while (aliasEndIndex < value.length && parenCount > 0) {
+                if (value[aliasEndIndex] === '(')
+                    parenCount++;
+                else if (value[aliasEndIndex] === ')')
+                    parenCount--;
+                aliasEndIndex++;
+            }
+            if (parenCount === 0) {
+                alias = value.substring(aliasStartIndex + 1, aliasEndIndex - 1).trim();
+            }
         }
     }
     // Parse function and parameters
@@ -751,23 +757,26 @@ function getTimeKeyEnhanced(value, interval, contextYear, contextMonth) {
     return String(value ?? 'null');
 }
 /**
- * Update transform function to use alias in series name
+ * ✅ UPDATED: Get series name with proper alias handling
  */
-function getSeriesName(agg) {
+function getSeriesName(agg, groupValue) {
+    // ✅ Priority 1: Use alias if provided
     if (agg.alias) {
-        return agg.alias;
+        return groupValue ? `${groupValue} - ${agg.alias}` : agg.alias;
     }
-    return `${agg.function}(${agg.field})`;
+    // ✅ Priority 2: Use default format
+    const defaultName = `${agg.function}(${agg.field})`;
+    return groupValue ? `${groupValue} - ${defaultName}` : defaultName;
 }
-// ============================================
-// UPDATED: transformToChartSeries with fixes
-// ============================================
+/**
+ * ✅ UPDATED: transformToChartSeries - use getSeriesName consistently
+ */
 function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
     const dataArray = Array.isArray(data) ? data : [];
     // Empty data handling
     if (!dataArray || dataArray.length === 0) {
         const series = aggregates.map(agg => ({
-            name: `${agg.function}(${agg.field})`,
+            name: getSeriesName(agg), // ✅ Use helper
             data: [0],
         }));
         return {
@@ -808,7 +817,8 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
             groupedDataMap.forEach((timeMap, groupValue) => {
                 aggregates.forEach((agg) => {
                     const { function: func, field } = agg;
-                    const seriesName = `${groupValue} - ${func}(${field})`;
+                    // ✅ Use helper with group value
+                    const seriesName = getSeriesName(agg, groupValue);
                     const seriesData = timeLabels.map(label => {
                         const items = timeMap.get(label);
                         if (!items || items.length === 0)
@@ -852,6 +862,7 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
         });
         const series = aggregates.map((agg) => {
             const { function: func, field } = agg;
+            // ✅ Use helper
             const seriesName = getSeriesName(agg);
             const seriesData = timeLabels.map(label => {
                 const items = dataMap.get(label);
@@ -881,19 +892,22 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
             raw: dataArray,
         };
     }
+    // GROUPED CHART (non-time-series)
     if (groupBy && groupBy.length > 0) {
         const categoryField = chartConfig?.groupField || groupBy[0];
         const categories = dataArray.map(item => {
             const val = getNestedValue(item, categoryField);
-            // Pass the full field path so extractDisplayValue knows which field to extract
             return extractDisplayValue(val, categoryField);
         });
         const series = aggregates.map((agg) => {
             const { function: func, field } = agg;
-            const seriesName = `${func}(${field})`;
+            // ✅ Use helper
+            const seriesName = getSeriesName(agg);
             const seriesData = dataArray.map(item => {
                 if (func === 'count') {
-                    return typeof item._count === 'number' ? item._count : (item._count?.[field] || item._count || 0);
+                    return typeof item._count === 'number'
+                        ? item._count
+                        : (item._count?.[field] || item._count || 0);
                 }
                 return item[`_${func}`]?.[field] || 0;
             });
@@ -912,10 +926,13 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
     const categories = dataArray.map((_, idx) => `Category ${idx + 1}`);
     const series = aggregates.map((agg) => {
         const { function: func, field } = agg;
-        const seriesName = `${func}(${field})`;
+        // ✅ Use helper
+        const seriesName = getSeriesName(agg);
         const seriesData = dataArray.map(item => {
             if (func === 'count') {
-                return typeof item._count === 'number' ? item._count : (item._count?.[field] || item._count || 0);
+                return typeof item._count === 'number'
+                    ? item._count
+                    : (item._count?.[field] || item._count || 0);
             }
             return item[`_${func}`]?.[field] || 0;
         });
@@ -993,9 +1010,9 @@ function buildIncludeForRelationships(allFields, aggregates) {
     return include;
 }
 /**
- * Aggregate Pipe
+ * ✅ CRITICAL FIX: Update AggregatePipe transform to properly store alias
  */
-let AggregatePipe = class AggregatePipe {
+class AggregatePipe {
     transform(value) {
         if (!value || value.trim() === '')
             return undefined;
@@ -1030,6 +1047,7 @@ let AggregatePipe = class AggregatePipe {
                         throw new common_1.BadRequestException('groupBy requires fields. Use: groupBy: (field) or groupBy: (field1, field2)');
                     }
                 }
+                // ✅ Parse aggregate with alias
                 if (val) {
                     const aggFunc = parseAggregateFunction(val);
                     if (aggFunc) {
@@ -1037,7 +1055,7 @@ let AggregatePipe = class AggregatePipe {
                             field: key,
                             function: aggFunc.function,
                             params: aggFunc.params,
-                            alias: aggFunc.alias,
+                            alias: aggFunc.alias, // ✅ Store alias
                         });
                     }
                 }
@@ -1051,11 +1069,11 @@ let AggregatePipe = class AggregatePipe {
                 return {
                     prismaQuery: null,
                     aggregates,
-                    groupBy: finalGroupBy, // ✅ groupBy TANPA dateField
+                    groupBy: finalGroupBy,
                     isGrouped: true,
                     chartConfig,
                     useManualAggregation: true,
-                    isTimeSeries: true, // ✅ Flag baru
+                    isTimeSeries: true,
                 };
             }
             // NON-TIME-SERIES: Logic yang sama seperti sebelumnya
@@ -1185,10 +1203,7 @@ let AggregatePipe = class AggregatePipe {
         const dataArray = Array.isArray(data) ? data : [data];
         return transformToChartSeries(dataArray, aggregateConfig.aggregates, aggregateConfig.chartConfig, aggregateConfig.groupBy);
     }
-};
-AggregatePipe = __decorate([
-    (0, common_1.Injectable)()
-], AggregatePipe);
+}
 exports.default = AggregatePipe;
 /**
  * Build Prisma aggregate object
