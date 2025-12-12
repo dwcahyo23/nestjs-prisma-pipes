@@ -290,40 +290,23 @@ function getNestedValue(obj: any, path: string): any {
 	return value;
 }
 
-function extractDisplayValue(value: any, fieldPath?: string): string {
+function extractDisplayValue(value: any, path?: string): string {
+	// Handle null/undefined
 	if (value === null || value === undefined) {
 		return 'null';
 	}
 
+	// Handle primitives
 	if (typeof value !== 'object') {
 		return String(value);
 	}
 
+	// Handle Date
 	if (value instanceof Date) {
 		return getTimeKey(value, 'day');
 	}
 
-	// ✅ CRITICAL FIX: Navigate from root object using full fieldPath
-	if (fieldPath && fieldPath.includes('.')) {
-		// fieldPath is the FULL path from root, so we need to navigate from value (which is root)
-		const pathValue = getNestedValue(value, fieldPath);
-
-		// ✅ Handle null explicitly
-		if (pathValue === null) {
-			return 'null';
-		}
-
-		if (pathValue !== undefined) {
-			if (typeof pathValue !== 'object') {
-				return String(pathValue);
-			}
-			if (pathValue instanceof Date) {
-				return getTimeKey(pathValue, 'day');
-			}
-		}
-	}
-
-	// Fallback logic...
+	// Traverse nested objects to find the deepest scalar value
 	let current: any = value;
 	let depth = 0;
 
@@ -334,19 +317,25 @@ function extractDisplayValue(value: any, fieldPath?: string): string {
 			current = current[keys[0]];
 			depth++;
 		} else {
+			// Multiple keys, can't determine which to use
 			break;
 		}
 	}
 
-	if (current !== value && typeof current !== 'object') {
-		return String(current);
+	// If we found a scalar after traversal
+	if (current !== value) {
+		if (current === null) {
+			return 'null';
+		}
+		if (typeof current !== 'object') {
+			return String(current);
+		}
+		if (current instanceof Date) {
+			return getTimeKey(current, 'day');
+		}
 	}
 
-	// ✅ Return 'null' string for null values instead of JSON
-	if (current === null) {
-		return 'null';
-	}
-
+	// Last resort
 	return JSON.stringify(value);
 }
 
