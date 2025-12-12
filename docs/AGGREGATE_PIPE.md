@@ -9,6 +9,7 @@ Transform query strings into Prisma aggregations with powerful grouping and char
 - [Overview](#overview)
 - [Basic Usage](#basic-usage)
 - [Aggregate Functions](#aggregate-functions)
+- [Alias Support](#alias-support)
 - [Grouping](#grouping)
 - [Chart Generation](#chart-generation)
 - [Time Series](#time-series)
@@ -23,6 +24,7 @@ Transform query strings into Prisma aggregations with powerful grouping and char
 AggregatePipe provides:
 
 - ✅ 5 aggregate functions (sum, avg, min, max, count)
+- ✅ **Custom alias for series names**
 - ✅ Multi-field grouping
 - ✅ Relationship aggregation
 - ✅ **Many-to-many pivot table aggregation**
@@ -74,7 +76,7 @@ GET /analytics/sales?aggregate=total:avg()
 GET /analytics/sales?aggregate=id:count()
 
 # Multiple aggregates
-GET /analytics/sales?aggregate=total:sum(),orders:count(),avgValue:avg(total)
+GET /analytics/sales?aggregate=total:sum(),orders:count(),avgValue:avg()
 ```
 
 ---
@@ -173,6 +175,174 @@ GET /analytics/orders?aggregate=id:count(),groupBy:(status)
 
 ---
 
+## Alias Support
+
+Customize series names with user-friendly labels using the `:alias()` syntax.
+
+### Basic Alias Usage
+
+```bash
+# Single aggregate with alias
+GET /analytics/sales?aggregate=revenue:sum():alias(Total Revenue)
+
+# Multiple aggregates with aliases
+GET /analytics/sales?aggregate=revenue:sum():alias(Total Revenue),orders:count():alias(Order Count)
+```
+
+**Without Alias:**
+```typescript
+{
+  categories: ['Total'],
+  series: [
+    { name: 'sum(revenue)', data: [15000] }
+  ]
+}
+```
+
+**With Alias:**
+```typescript
+{
+  categories: ['Total'],
+  series: [
+    { name: 'Total Revenue', data: [15000] }
+  ]
+}
+```
+
+### Mixed Usage
+
+You can mix aliases and default names in the same query:
+
+```bash
+# Some with alias, some without
+GET /analytics/sales?aggregate=revenue:sum():alias(Total Revenue),quantity:sum(),avgValue:avg():alias(Average Value)
+```
+
+**Result:**
+```typescript
+{
+  categories: ['Total'],
+  series: [
+    { name: 'Total Revenue', data: [15000] },      // ✅ With alias
+    { name: 'sum(quantity)', data: [250] },         // ✅ Default name
+    { name: 'Average Value', data: [125.50] }       // ✅ With alias
+  ]
+}
+```
+
+### Alias with Grouping
+
+Aliases work seamlessly with grouped data:
+
+```bash
+# Grouped by category with alias
+GET /analytics/sales?aggregate=revenue:sum():alias(Revenue),groupBy:(category)
+```
+
+**Result:**
+```typescript
+{
+  categories: ['Electronics', 'Clothing', 'Books'],
+  series: [
+    { name: 'Revenue', data: [5000, 3000, 2000] }
+  ]
+}
+```
+
+### Alias with Time Series
+
+```bash
+# Monthly revenue with custom name
+GET /analytics/sales?aggregate=revenue:sum():alias(Monthly Revenue),chart:line(orderDate,month:2025)
+```
+
+**Result:**
+```typescript
+{
+  categories: ['Jan', 'Feb', 'Mar', ...],
+  series: [
+    { name: 'Monthly Revenue', data: [5000, 6000, 7500, ...] }
+  ],
+  chartType: 'line'
+}
+```
+
+### Multiple Series with Aliases
+
+Perfect for dashboard KPIs:
+
+```bash
+# Performance metrics with readable names
+GET /analytics/performance?aggregate=s:avg():alias(Safety Score),p:avg():alias(Productivity),pd:avg():alias(Performance)
+```
+
+**Result:**
+```typescript
+{
+  categories: ['Total'],
+  series: [
+    { name: 'Safety Score', data: [45.5] },
+    { name: 'Productivity', data: [85.3] },
+    { name: 'Performance', data: [92.1] }
+  ]
+}
+```
+
+### Alias with Grouped Time Series
+
+When combining grouping with time series:
+
+```bash
+# Revenue by status over time with alias
+GET /analytics/sales?aggregate=revenue:sum():alias(Revenue),groupBy:(status),chart:line(orderDate,month:2025)
+```
+
+**Result:**
+```typescript
+{
+  categories: ['Jan', 'Feb', 'Mar', ...],
+  series: [
+    { name: 'completed - Revenue', data: [4000, 5000, 6000, ...] },
+    { name: 'pending - Revenue', data: [800, 900, 1200, ...] },
+    { name: 'cancelled - Revenue', data: [200, 100, 300, ...] }
+  ],
+  chartType: 'line'
+}
+```
+
+**Note:** When grouping is combined with aliases, the group value is prepended to the alias name for clarity.
+
+### Alias Best Practices
+
+```bash
+# ✅ Good - Clear, descriptive names
+GET /analytics?aggregate=revenue:sum():alias(Total Sales),orders:count():alias(Number of Orders)
+
+# ✅ Good - Short names for charts
+GET /analytics?aggregate=s:avg():alias(Safety),p:avg():alias(Productivity)
+
+# ✅ Good - Localized names (if needed)
+GET /analytics?aggregate=revenue:sum():alias(Pendapatan Total)
+
+# ❌ Bad - Too long
+GET /analytics?aggregate=revenue:sum():alias(The Total Revenue Generated From All Orders This Year)
+
+# ❌ Bad - Special characters that might break
+GET /analytics?aggregate=revenue:sum():alias(Revenue (in $))
+```
+
+### Alias Syntax Rules
+
+- ✅ Syntax: `field:function():alias(Custom Name)`
+- ✅ Alias is optional - defaults to `function(field)`
+- ✅ Can be mixed with non-aliased aggregates
+- ✅ Works with all aggregate functions
+- ✅ Works with grouping and time series
+- ✅ Spaces are allowed in alias names
+- ⚠️ Avoid special characters like `()[]{}` in alias names
+
+---
+
 ## Grouping
 
 ### Single Field Grouping
@@ -250,8 +420,8 @@ GET /analytics/performance?aggregate=s:avg(),p:avg(),pd:avg(),groupBy:(productio
 # Performance by machine (many-to-many)
 GET /analytics/performance?aggregate=output:sum(),groupBy:(productionEmployeePerformanceMachine.mcCode)
 
-# With chart visualization
-GET /analytics/performance?aggregate=s:avg(),p:avg(),pd:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:radar(productionEmployeePerformanceLeaders.leaderNik)
+# With chart visualization and aliases
+GET /analytics/performance?aggregate=s:avg():alias(Safety),p:avg():alias(Productivity),pd:avg():alias(Performance),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:radar(productionEmployeePerformanceLeaders.leaderNik)
 ```
 
 **How it works:**
@@ -286,9 +456,9 @@ model ProductionEmployeePerformanceLeader {
 {
   categories: ['NIK001', 'NIK002', 'NIK003'],
   series: [
-    { name: 'avg(s)', data: [45.5, 38.2, 42.1] },
-    { name: 'avg(p)', data: [85.3, 78.9, 82.4] },
-    { name: 'avg(pd)', data: [92.1, 88.5, 90.3] }
+    { name: 'Safety', data: [45.5, 38.2, 42.1] },
+    { name: 'Productivity', data: [85.3, 78.9, 82.4] },
+    { name: 'Performance', data: [92.1, 88.5, 90.3] }
   ],
   chartType: 'radar'
 }
@@ -412,8 +582,8 @@ GET /analytics/sales?aggregate=revenue:sum(),groupBy:(region),chart:donut(region
 # Daily revenue for 2025
 GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,day:2025)
 
-# Daily orders with filter
-GET /analytics/orders?aggregate=id:count(),chart:line(createdAt,day:2025)&filter=status:completed
+# Daily orders with filter and alias
+GET /analytics/orders?aggregate=id:count():alias(Daily Orders),chart:line(createdAt,day:2025)&filter=status:completed
 ```
 
 **Features:**
@@ -426,7 +596,7 @@ GET /analytics/orders?aggregate=id:count(),chart:line(createdAt,day:2025)&filter
 {
   categories: ['2025-01-01', '2025-01-02', '2025-01-03', ...],
   series: [
-    { name: 'sum(revenue)', data: [1200, 1500, 1350, ...] }
+    { name: 'Daily Orders', data: [1200, 1500, 1350, ...] }
   ],
   chartType: 'line'
 }
@@ -436,10 +606,10 @@ GET /analytics/orders?aggregate=id:count(),chart:line(createdAt,day:2025)&filter
 
 ```bash
 # Monthly revenue for 2025
-GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
+GET /analytics/sales?aggregate=revenue:sum():alias(Monthly Revenue),chart:line(orderDate,month:2025)
 
 # Monthly orders by status (stacked)
-GET /analytics/orders?aggregate=id:count(),groupBy:(status),chart:area(createdAt,month:2025,stacked)
+GET /analytics/orders?aggregate=id:count():alias(Orders),groupBy:(status),chart:area(createdAt,month:2025,stacked)
 ```
 
 **Features:**
@@ -452,7 +622,7 @@ GET /analytics/orders?aggregate=id:count(),groupBy:(status),chart:area(createdAt
 {
   categories: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
   series: [
-    { name: 'sum(revenue)', data: [5000, 6000, 7500, 8000, ...] }
+    { name: 'Monthly Revenue', data: [5000, 6000, 7500, 8000, ...] }
   ],
   chartType: 'line'
 }
@@ -462,7 +632,7 @@ GET /analytics/orders?aggregate=id:count(),groupBy:(status),chart:area(createdAt
 
 ```bash
 # 5-year revenue trend (ending 2025)
-GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,year:2025)
+GET /analytics/sales?aggregate=revenue:sum():alias(Yearly Revenue),chart:line(orderDate,year:2025)
 
 # Yearly comparison
 GET /analytics/sales?aggregate=revenue:sum(),groupBy:(category),chart:bar(orderDate,year:2025)
@@ -477,7 +647,7 @@ GET /analytics/sales?aggregate=revenue:sum(),groupBy:(category),chart:bar(orderD
 {
   categories: ['2021', '2022', '2023', '2024', '2025'],
   series: [
-    { name: 'sum(revenue)', data: [45000, 52000, 61000, 70000, 85000] }
+    { name: 'Yearly Revenue', data: [45000, 52000, 61000, 70000, 85000] }
   ],
   chartType: 'line'
 }
@@ -487,10 +657,10 @@ GET /analytics/sales?aggregate=revenue:sum(),groupBy:(category),chart:bar(orderD
 
 ```bash
 # Monthly revenue by status (multi-series)
-GET /analytics/sales?aggregate=revenue:sum(),groupBy:(status),chart:line(orderDate,month:2025)
+GET /analytics/sales?aggregate=revenue:sum():alias(Revenue),groupBy:(status),chart:line(orderDate,month:2025)
 
 # Daily orders by region (stacked area)
-GET /analytics/orders?aggregate=id:count(),groupBy:(region),chart:area(createdAt,day:2025,stacked)
+GET /analytics/orders?aggregate=id:count():alias(Orders),groupBy:(region),chart:area(createdAt,day:2025,stacked)
 ```
 
 **Output with multiple series:**
@@ -498,9 +668,9 @@ GET /analytics/orders?aggregate=id:count(),groupBy:(region),chart:area(createdAt
 {
   categories: ['Jan', 'Feb', 'Mar', ...],
   series: [
-    { name: 'completed', data: [4000, 5000, 6000, ...] },
-    { name: 'pending', data: [800, 900, 1200, ...] },
-    { name: 'cancelled', data: [200, 100, 300, ...] }
+    { name: 'completed - Revenue', data: [4000, 5000, 6000, ...] },
+    { name: 'pending - Revenue', data: [800, 900, 1200, ...] },
+    { name: 'cancelled - Revenue', data: [200, 100, 300, ...] }
   ],
   chartType: 'line',
   stacked: true
@@ -511,14 +681,14 @@ GET /analytics/orders?aggregate=id:count(),groupBy:(region),chart:area(createdAt
 
 ## Advanced Examples
 
-### Sales Analytics Dashboard
+### Sales Analytics Dashboard with Aliases
 
 ```typescript
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private prisma: PrismaService) {}
 
-  // Total revenue
+  // Total revenue with custom name
   @Get('revenue/total')
   async getTotalRevenue(
     @Query('filter', WherePipe) where?: Pipes.Where,
@@ -538,7 +708,12 @@ export class AnalyticsController {
     @Query('filter', WherePipe) where?: Pipes.Where,
   ) {
     const aggregate = {
-      aggregates: [{ field: 'total', function: 'sum', params: [] }],
+      aggregates: [{ 
+        field: 'total', 
+        function: 'sum', 
+        params: [],
+        alias: 'Regional Revenue' // ✅ Alias in code
+      }],
       groupBy: ['region'],
       chartConfig: { type: 'pie', groupField: 'region' },
     } as Pipes.Aggregate;
@@ -550,109 +725,20 @@ export class AnalyticsController {
     );
     return AggregatePipe.toChartSeries(data, aggregate);
   }
-
-  // Monthly trend
-  @Get('revenue/monthly')
-  async getMonthlyRevenue(
-    @Query('year') year = 2025,
-  ) {
-    const aggregate = {
-      aggregates: [{ field: 'total', function: 'sum', params: [] }],
-      chartConfig: {
-        type: 'line',
-        dateField: 'orderDate',
-        interval: 'month',
-        year: year,
-      },
-    } as Pipes.Aggregate;
-
-    const data = await AggregatePipe.execute(
-      this.prisma.order,
-      aggregate
-    );
-    return AggregatePipe.toChartSeries(data, aggregate);
-  }
 }
 ```
 
 **Requests:**
 ```bash
-# Total revenue this year
-GET /analytics/revenue/total?aggregate=total:sum()&filter=orderDate:gte+date(2025-01-01)
+# Total revenue with alias
+GET /analytics/revenue/total?aggregate=total:sum():alias(Total Revenue)&filter=orderDate:gte+date(2025-01-01)
 
-# Revenue by region
-GET /analytics/revenue/by-region
-
-# Monthly revenue for 2025
-GET /analytics/revenue/monthly?year=2025
-
-# Monthly revenue by status
-GET /analytics/revenue/monthly?year=2025&aggregate=total:sum(),groupBy:(status)
+# KPI Dashboard with multiple aliases
+GET /analytics/revenue/total?aggregate=total:sum():alias(Revenue),id:count():alias(Orders),total:avg():alias(Avg Order Value)
 ```
 
-### Product Performance
+### Employee Performance with Aliases
 
-```typescript
-@Controller('products')
-export class ProductController {
-  @Get('stats')
-  async getProductStats(
-    @Query('filter', WherePipe) where?: Pipes.Where,
-    @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
-  ) {
-    const data = await AggregatePipe.execute(
-      this.prisma.product,
-      aggregate,
-      where
-    );
-    return AggregatePipe.toChartSeries(data, aggregate);
-  }
-}
-```
-
-**Requests:**
-```bash
-# Total inventory value
-GET /products/stats?aggregate=value:sum(price)
-
-# Average price by category
-GET /products/stats?aggregate=price:avg(),groupBy:(category),chart:bar(category)
-
-# Stock levels by warehouse
-GET /products/stats?aggregate=stock:sum(),groupBy:(warehouse.name),chart:pie(warehouse.name)
-```
-
-### Customer Analytics
-
-```typescript
-@Controller('customers')
-export class CustomerController {
-  @Get('analytics')
-  async getCustomerAnalytics(
-    @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
-  ) {
-    const data = await AggregatePipe.execute(
-      this.prisma.customer,
-      aggregate
-    );
-    return AggregatePipe.toChartSeries(data, aggregate);
-  }
-}
-```
-
-**Requests:**
-```bash
-# Customers by region
-GET /customers/analytics?aggregate=id:count(),groupBy:(region),chart:pie(region)
-
-# Average lifetime value by tier
-GET /customers/analytics?aggregate=lifetimeValue:avg(),groupBy:(tier),chart:bar(tier)
-
-# Customer acquisition over time
-GET /customers/analytics?aggregate=id:count(),chart:line(createdAt,month:2025)
-```
-
-### Employee Performance with Many-to-Many
 ```typescript
 @Controller('performance')
 export class PerformanceController {
@@ -670,35 +756,29 @@ export class PerformanceController {
     );
     return AggregatePipe.toChartSeries(data, aggregate);
   }
-  
-  @Get('by-machine')
-  async getPerformanceByMachine(
-    @Query('filter', WherePipe) where?: Pipes.Where,
-    @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
-  ) {
-    const data = await AggregatePipe.execute(
-      this.prisma.productionEmployeePerformance,
-      aggregate,
-      where
-    );
-    return AggregatePipe.toChartSeries(data, aggregate);
-  }
 }
 ```
 
 **Requests:**
 ```bash
-# Average scores by leader
-GET /performance/by-leader?aggregate=s:avg(),p:avg(),pd:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:radar(productionEmployeePerformanceLeaders.leaderNik)
+# Performance metrics with readable names
+GET /performance/by-leader?aggregate=s:avg():alias(Safety Score),p:avg():alias(Productivity),pd:avg():alias(Performance),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:radar(productionEmployeePerformanceLeaders.leaderNik)
 
-# Total output by machine
-GET /performance/by-machine?aggregate=output:sum(),groupBy:(productionEmployeePerformanceMachine.mcCode),chart:bar(productionEmployeePerformanceMachine.mcCode)
+# Monthly performance trend
+GET /performance/by-leader?aggregate=s:avg():alias(Safety),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:line(date,month:2025)
+```
 
-# Performance by leader with time series
-GET /performance/by-leader?aggregate=s:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:line(date,month:2025)
-
-# Filtered by date range
-GET /performance/by-leader?aggregate=s:avg(),p:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik)&filter=date:gte+date(2025-01-01),date:lte+date(2025-12-31)
+**Response:**
+```typescript
+{
+  categories: ['NIK001', 'NIK002', 'NIK003'],
+  series: [
+    { name: 'Safety Score', data: [45.5, 38.2, 42.1] },
+    { name: 'Productivity', data: [85.3, 78.9, 82.4] },
+    { name: 'Performance', data: [92.1, 88.5, 90.3] }
+  ],
+  chartType: 'radar'
+}
 ```
 
 ---
@@ -760,47 +840,62 @@ const chartData = AggregatePipe.toChartSeries(data, aggregate);
 ### Query String Syntax
 
 ```
-aggregate=field:function(params),groupBy:(fields),chart:type(config)
+aggregate=field:function(params):alias(name),groupBy:(fields),chart:type(config)
 ```
 
 **Components:**
 - `field:function()` - Aggregate specification
+- `:alias(name)` - Optional custom series name
 - `groupBy:(fields)` - Optional grouping fields
 - `chart:type(config)` - Optional chart configuration
 
 **Examples:**
 ```
 aggregate=revenue:sum()
-aggregate=price:avg(),groupBy:(category)
-aggregate=total:sum(),chart:line(orderDate,month:2025)
-aggregate=revenue:sum(),groupBy:(region,status),chart:bar(region,stacked)
+aggregate=revenue:sum():alias(Total Revenue)
+aggregate=price:avg():alias(Average Price),groupBy:(category)
+aggregate=total:sum():alias(Monthly Revenue),chart:line(orderDate,month:2025)
+aggregate=s:avg():alias(Safety),p:avg():alias(Productivity),groupBy:(leaderNik)
 ```
 
 ---
 
 ## Best Practices
 
-### 1. Use Filters to Reduce Data
+### 1. Use Meaningful Aliases for User-Facing Data
+
+```bash
+# ✅ Good - Clear names for dashboards
+GET /analytics?aggregate=revenue:sum():alias(Total Sales),orders:count():alias(Number of Orders)
+
+# ✅ Good - Short names for charts
+GET /analytics?aggregate=s:avg():alias(Safety),p:avg():alias(Productivity)
+
+# ❌ Bad - Default technical names
+GET /analytics?aggregate=revenue:sum(),orders:count()
+```
+
+### 2. Use Filters to Reduce Data
 
 ```bash
 # ✅ Good - Filter before aggregation
-GET /analytics/sales?aggregate=revenue:sum()&filter=orderDate:gte+date(2025-01-01)
+GET /analytics/sales?aggregate=revenue:sum():alias(YTD Revenue)&filter=orderDate:gte+date(2025-01-01)
 
 # ❌ Bad - Aggregate all data
 GET /analytics/sales?aggregate=revenue:sum()
 ```
 
-### 2. Specify Year for Time Series
+### 3. Specify Year for Time Series
 
 ```bash
-# ✅ Good - Explicit year
-GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
+# ✅ Good - Explicit year with alias
+GET /analytics/sales?aggregate=revenue:sum():alias(Monthly Sales),chart:line(orderDate,month:2025)
 
-# ❌ Bad - No year (may use current year)
+# ❌ Bad - No year
 GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,month)
 ```
 
-### 3. Add Database Indexes
+### 4. Add Database Indexes
 
 ```prisma
 // ✅ Good - Index grouped and aggregated fields
@@ -818,21 +913,6 @@ model Order {
 }
 ```
 
-### 4. Handle Large Datasets
-
-```typescript
-// ✅ Good - Use pagination for large results
-@Get('sales')
-async getSales(
-  @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
-  @Query('limit') limit = 100,
-) {
-  // Add limit to groupBy queries
-  const data = await AggregatePipe.execute(model, aggregate);
-  return data.slice(0, limit);
-}
-```
-
 ### 5. Configure Timezone
 
 ```typescript
@@ -840,19 +920,48 @@ async getSales(
 configurePipesTimezone({ offset: '+07:00' });
 
 // Time series will respect timezone boundaries
-GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
+GET /analytics/sales?aggregate=revenue:sum():alias(Daily Revenue),chart:line(orderDate,day:2025)
 ```
 
 ---
 
 ## Common Issues
 
-### Issue 1: Relationship Aggregation Slow
+### Issue 1: Alias Not Appearing
+
+**Problem:**
+```bash
+# Alias specified but still shows default name
+GET /analytics?aggregate=revenue:sum():alias(Total Revenue)
+
+# Result still shows:
+{ name: 'sum(revenue)', data: [...] }
+```
+
+**Solution:**
+Ensure you're using the updated `parseAggregateFunction` and `getSeriesName` helper. The alias feature requires code changes to support the `:alias()` syntax.
+
+### Issue 2: Special Characters in Alias
+
+**Problem:**
+```bash
+# Alias with parentheses breaks parsing
+GET /analytics?aggregate=revenue:sum():alias(Revenue ($))
+```
+
+**Solution:**
+Avoid special characters like `()[]{}` in alias names. Use simple text:
+```bash
+# ✅ Good
+GET /analytics?aggregate=revenue:sum():alias(Revenue in USD)
+```
+
+### Issue 3: Relationship Aggregation Slow
 
 **Problem:**
 ```bash
 # Slow query with relationship grouping
-GET /analytics/sales?aggregate=revenue:sum(),groupBy:(warehouse.region)
+GET /analytics/sales?aggregate=revenue:sum():alias(Regional Revenue),groupBy:(warehouse.region)
 ```
 
 **Solution:**
@@ -870,76 +979,6 @@ model Order {
   @@index([warehouseRegion])
 }
 ```
-
-### Issue 2: Time Series Missing Data Points
-
-**Problem:**
-```bash
-# Some months show 0 or are missing
-GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
-```
-
-**Solution:**
-AggregatePipe automatically fills missing periods with 0. Ensure:
-- Year parameter is correct
-- Date field exists in data
-- Timezone is properly configured
-
-### Issue 3: Chart Type Not Applied
-
-**Problem:**
-```bash
-# Chart type not showing in result
-GET /analytics/sales?aggregate=revenue:sum(),chart:bar(category)
-```
-
-**Solution:**
-Ensure you're using `toChartSeries()` to transform the data:
-
-```typescript
-const data = await AggregatePipe.execute(model, aggregate, where);
-return AggregatePipe.toChartSeries(data, aggregate); // ✅ Adds chartType
-```
-
-### Issue 4: Many-to-Many Returns Null Categories
-
-**Problem:**
-```bash
-# Pivot table grouping returns null
-GET /analytics?aggregate=score:avg(),groupBy:(pivotTable.field)
-
-# Result shows null:
-{
-  "categories": ["null"],
-  "series": [{ "name": "avg(score)", "data": [42.5] }]
-}
-```
-
-**Cause:**
-Array relationships in pivot tables were not being flattened properly.
-
-**Solution:**
-This is now automatically handled. Ensure:
-- Your groupBy field path is correct: `pivotTableName.fieldName`
-- The relationship is properly defined in Prisma schema
-- The pivot table has data (not an empty array)
-
-**Verification:**
-```bash
-# Test if data exists
-GET /api/entity?include=pivotTable
-
-# Should return:
-{
-  "id": "1",
-  "pivotTable": [
-    { "id": "p1", "field": "value1" },
-    { "id": "p2", "field": "value2" }
-  ]
-}
-```
-
-**Note:** Each record with N pivot entries will be counted N times in aggregation, which is correct behavior for many-to-many analysis.
 
 ---
 

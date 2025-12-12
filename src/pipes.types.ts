@@ -235,6 +235,7 @@ export namespace Pipes {
 		field: string;
 		function: AggregateFunction;
 		params: string[];
+		alias?: string;
 	}
 
 	/**

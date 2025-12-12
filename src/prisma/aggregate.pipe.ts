@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
 import { Pipes } from 'src/pipes.types';
 import TimezoneService from './timezone.service';
+import { AggregateSpec } from 'src';
 
 
 /**
@@ -43,14 +44,34 @@ function getTimeKeyWithTimezone(date: Date, interval: Pipes.TimeInterval): strin
 
 
 /**
- * Parse aggregate function with parameters
+ * Parse aggregate function with parameters and alias support
+ * Supports formats:
+ * - sum()
+ * - sum():alias(Total Revenue)
+ * - avg(price):alias(Average Price)
  */
 function parseAggregateFunction(value: string): {
 	function: AggregateFunction;
 	params: string[];
+	alias?: string;
 } | null {
 	if (!value || typeof value !== 'string') return null;
-	const match = /^(sum|avg|min|max|count)(?:\(([^)]*)\))?$/i.exec(value.trim());
+
+	// Split by :alias() if exists
+	const aliasSplit = value.split(':alias(');
+	let funcPart = aliasSplit[0].trim();
+	let alias: string | undefined;
+
+	// Extract alias if provided
+	if (aliasSplit.length > 1) {
+		const aliasMatch = aliasSplit[1].match(/^([^)]+)\)/);
+		if (aliasMatch) {
+			alias = aliasMatch[1].trim();
+		}
+	}
+
+	// Parse function and parameters
+	const match = /^(sum|avg|min|max|count)(?:\(([^)]*)\))?$/i.exec(funcPart);
 
 	if (!match) return null;
 
@@ -62,6 +83,7 @@ function parseAggregateFunction(value: string): {
 	return {
 		function: func.toLowerCase() as AggregateFunction,
 		params,
+		alias,
 	};
 }
 
@@ -881,6 +903,16 @@ function getTimeKeyEnhanced(
 	return String(value ?? 'null');
 }
 
+/**
+ * Update transform function to use alias in series name
+ */
+function getSeriesName(agg: AggregateSpec): string {
+	if (agg.alias) {
+		return agg.alias;
+	}
+	return `${agg.function}(${agg.field})`;
+}
+
 // ============================================
 // UPDATED: transformToChartSeries with fixes
 // ============================================
@@ -1015,7 +1047,7 @@ function transformToChartSeries(
 
 		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 			const { function: func, field } = agg;
-			const seriesName = `${func}(${field})`;
+			const seriesName = getSeriesName(agg);
 
 			const seriesData = timeLabels.map(label => {
 				const items = dataMap.get(label);
@@ -1244,6 +1276,7 @@ export default class AggregatePipe implements PipeTransform {
 							field: key,
 							function: aggFunc.function,
 							params: aggFunc.params,
+							alias: aggFunc.alias,
 						});
 					}
 				}
