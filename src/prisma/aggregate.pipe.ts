@@ -204,12 +204,8 @@ function getTimeKey(date: Date | string, interval: Pipes.TimeInterval): string {
 }
 
 
-// ============================================
-// BUG FIX 2: Get nested value properly for chart categories
-// ============================================
-
 /**
- * Get nested property value - FIXED untuk chart categories
+ * Get nested property value
  */
 function getNestedValue(obj: any, path: string): any {
 	const keys = path.split('.');
@@ -229,8 +225,8 @@ function getNestedValue(obj: any, path: string): any {
 }
 
 /**
- * ✅ NEW: Extract display value from nested object
- * Handles cases like: { machine: { mcCode: "BF-08414" } } → "BF-08414"
+ * ✅ UPDATED: Extract display value from nested object
+ * Now properly navigates multi-level nested structures
  */
 function extractDisplayValue(value: any, fieldPath?: string): string {
 	if (value === null || value === undefined) {
@@ -249,28 +245,51 @@ function extractDisplayValue(value: any, fieldPath?: string): string {
 
 	// ✅ PRIORITY 1: If fieldPath is provided, extract the last field name
 	// Example: "productionEmployeePerformanceMachine.machine.mcCode" → extract "mcCode"
-	// This is the ONLY field we should check - it's what the user explicitly requested
 	if (fieldPath) {
 		const pathParts = fieldPath.split('.');
 		const lastField = pathParts[pathParts.length - 1];
 
-		// Check if the value object has this field
-		if (value[lastField] !== undefined && value[lastField] !== null) {
-			return String(value[lastField]);
+		// Navigate through the object to find the value
+		let current = value;
+		for (let i = 0; i < pathParts.length && current != null; i++) {
+			// Skip if we're already at the right level
+			if (current[lastField] !== undefined && current[lastField] !== null) {
+				return String(current[lastField]);
+			}
+			current = current[pathParts[i]];
+		}
+
+		// If we found the final value after navigation
+		if (current !== undefined && current !== null && typeof current !== 'object') {
+			return String(current);
 		}
 	}
 
-	// ✅ PRIORITY 2: If object has only one property, use it
-	// This handles cases where the object is a simple wrapper
-	const keys = Object.keys(value).filter(k => !k.startsWith('_')); // Ignore internal fields
-	if (keys.length === 1) {
-		return String(value[keys[0]]);
+	// ✅ PRIORITY 2: Try to extract from nested structure
+	// Walk through the object to find the first non-object value
+	let current: any = value;
+	while (current != null && typeof current === 'object' && !Array.isArray(current)) {
+		const keys = Object.keys(current).filter(k => !k.startsWith('_'));
+		if (keys.length === 0) break;
+
+		// If there's only one key, go deeper
+		if (keys.length === 1) {
+			current = current[keys[0]];
+		} else {
+			// Multiple keys - can't determine which to use
+			break;
+		}
+	}
+
+	// If we found a primitive value
+	if (current !== value && typeof current !== 'object') {
+		return String(current);
 	}
 
 	// ✅ PRIORITY 3: Fallback to JSON representation
-	// This gives users a clear view of what data exists
 	return JSON.stringify(value);
 }
+
 
 /**
  * ✅ NEW: Flatten array relationships for grouping
@@ -384,15 +403,21 @@ async function manualAggregateWithRelationships(
 		// Add group by fields to result
 		const groupKeyParts = groupKey.split('|||');
 		groupBy.forEach((field, idx) => {
-			const { relation, field: fieldName } = field.includes('.')
-				? parseRelationshipPath(field)
-				: { relation: '', field };
+			if (field.includes('.')) {
+				const parts = field.split('.');
+				let current = result;
 
-			if (relation) {
-				if (!result[relation]) {
-					result[relation] = {};
+				// Navigate/create nested structure up to the last part
+				for (let i = 0; i < parts.length - 1; i++) {
+					if (!current[parts[i]]) {
+						current[parts[i]] = {};
+					}
+					current = current[parts[i]];
 				}
-				result[relation][fieldName] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+
+				// Set the final value
+				const lastPart = parts[parts.length - 1];
+				current[lastPart] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
 			} else {
 				result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
 			}
@@ -544,15 +569,21 @@ async function manualAggregateForTimeSeries(
 
 		if (groupBy.length > 0) {
 			groupBy.forEach((field, idx) => {
-				const { relation, field: fieldName } = field.includes('.')
-					? parseRelationshipPath(field)
-					: { relation: '', field };
+				if (field.includes('.')) {
+					const fieldParts = field.split('.');
+					let current = result;
 
-				if (relation) {
-					if (!result[relation]) {
-						result[relation] = {};
+					// Navigate/create nested structure up to the last part
+					for (let i = 0; i < fieldParts.length - 1; i++) {
+						if (!current[fieldParts[i]]) {
+							current[fieldParts[i]] = {};
+						}
+						current = current[fieldParts[i]];
 					}
-					result[relation][fieldName] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+
+					// Set the final value
+					const lastPart = fieldParts[fieldParts.length - 1];
+					current[lastPart] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
 				} else {
 					result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
 				}
@@ -633,12 +664,8 @@ function detectDateFieldType(value: any): 'date' | 'year' | 'month' | 'day' | 'u
 	return 'unknown';
 }
 
-// ============================================
-// BUG FIX 1: Extract year from data properly
-// ============================================
-
 /**
- * Extract year range from actual data - FIXED
+ * Extract year range from actual data
  */
 function extractYearRangeFromData(
 	dataArray: any[],
@@ -656,7 +683,6 @@ function extractYearRangeFromData(
 		const str = String(value).trim();
 		let year: number | null = null;
 
-		// ✅ FIX: Handle "Dec 2025" format
 		if (/^[A-Za-z]{3}\s\d{4}$/.test(str)) {
 			const yearMatch = str.match(/\d{4}$/);
 			if (yearMatch) {
@@ -687,7 +713,7 @@ function extractYearRangeFromData(
 }
 
 /**
- * Generate time series labels - FIXED untuk year interval
+ * Generate time series labels
  */
 function generateTimeSeriesLabelsEnhanced(
 	interval: Pipes.TimeInterval,
@@ -884,19 +910,17 @@ function transformToChartSeries(
 		};
 	}
 
-	// TIME SERIES CHART - FIXED
+	// TIME SERIES CHART
 	if (chartConfig?.dateField && chartConfig?.interval) {
 		const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
 		const hasGrouping = nonDateGroupFields.length > 0;
 
-		// ✅ FIX 1: Extract year range dari data aktual
 		const yearRange = extractYearRangeFromData(
 			dataArray,
 			chartConfig.dateField,
 			chartConfig.interval
 		);
 
-		// ✅ FIX 1: Generate labels berdasarkan year range dari data, bukan current year
 		const timeLabels = generateTimeSeriesLabelsEnhanced(
 			chartConfig.interval,
 			yearRange || undefined,
@@ -910,7 +934,7 @@ function transformToChartSeries(
 
 			dataArray.forEach(item => {
 				const dateValue = getNestedValue(item, chartConfig.dateField!);
-				const groupValue = extractDisplayValue(getNestedValue(item, groupField)); // ✅ FIX 2
+				const groupValue = extractDisplayValue(getNestedValue(item, groupField), groupField);
 
 				if (dateValue) {
 					const timeKey = getTimeKeyEnhanced(
@@ -1025,15 +1049,15 @@ function transformToChartSeries(
 		};
 	}
 
-	// GROUPED (non-time-series) CHART - FIXED
 	if (groupBy && groupBy.length > 0) {
 		const categoryField = chartConfig?.groupField || groupBy[0];
 
-		// ✅ FIX 2: Extract display values properly
 		const categories = dataArray.map(item => {
 			const val = getNestedValue(item, categoryField);
-			return extractDisplayValue(val);
+			// Pass the full field path so extractDisplayValue knows which field to extract
+			return extractDisplayValue(val, categoryField);
 		});
+
 
 		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 			const { function: func, field } = agg;
@@ -1168,7 +1192,7 @@ function buildIncludeForRelationships(
 
 
 /**
- * Aggregate Pipe - FIXED untuk time series tanpa groupBy datetime
+ * Aggregate Pipe
  */
 @Injectable()
 export default class AggregatePipe implements PipeTransform {
@@ -1229,11 +1253,9 @@ export default class AggregatePipe implements PipeTransform {
 				throw new BadRequestException('At least one aggregate function is required');
 			}
 
-			// ✅ KEY FIX: Deteksi time series chart
 			const isTimeSeriesChart = !!(chartConfig?.dateField && chartConfig?.interval);
 
 			if (isTimeSeriesChart) {
-				// TIME SERIES: Gunakan manual aggregation, JANGAN tambahkan dateField ke groupBy
 				const finalGroupBy = groupByFields.filter(f => f !== chartConfig!.dateField);
 
 				return {
@@ -1304,7 +1326,7 @@ export default class AggregatePipe implements PipeTransform {
 	}
 
 	/**
-	 * Execute aggregate query - FIXED dengan time series support
+	 * Execute aggregate query
 	 */
 	static async execute(
 		prismaModel: any,

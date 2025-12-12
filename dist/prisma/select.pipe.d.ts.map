@@ -1,1 +1,0 @@
-{"version":3,"file":"select.pipe.d.ts","sourceRoot":"","sources":["../../src/prisma/select.pipe.ts"],"names":[],"mappings":"AAAA,OAAO,EAAmC,aAAa,EAAE,MAAM,gBAAgB,CAAC;AAChF,OAAO,EAAE,KAAK,EAAE,MAAM,iBAAiB,CAAC;AAExC;;GAEG;AAEH,MAAM,CAAC,OAAO,OAAO,WAAY,YAAW,aAAa;IACxD;;;;;OAKG;IACH,SAAS,CAAC,KAAK,EAAE,MAAM,GAAG,KAAK,CAAC,MAAM,GAAG,SAAS;CAuBlD"}
