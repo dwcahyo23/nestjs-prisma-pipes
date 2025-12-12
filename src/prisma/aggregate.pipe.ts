@@ -232,7 +232,7 @@ function getNestedValue(obj: any, path: string): any {
  * ✅ NEW: Extract display value from nested object
  * Handles cases like: { machine: { mcCode: "BF-08414" } } → "BF-08414"
  */
-function extractDisplayValue(value: any): string {
+function extractDisplayValue(value: any, fieldPath?: string): string {
 	if (value === null || value === undefined) {
 		return 'null';
 	}
@@ -247,17 +247,28 @@ function extractDisplayValue(value: any): string {
 		return getTimeKey(value, 'day');
 	}
 
-	// ✅ FIX: If it's an object, try to find a display field
-	// Common display fields in order of preference
-	const displayFields = ['mcCode', 'code', 'name', 'id', 'nik', 'title'];
+	// ✅ PRIORITY 1: If fieldPath is provided, extract the last field name
+	// Example: "productionEmployeePerformanceMachine.machine.mcCode" → extract "mcCode"
+	// This is the ONLY field we should check - it's what the user explicitly requested
+	if (fieldPath) {
+		const pathParts = fieldPath.split('.');
+		const lastField = pathParts[pathParts.length - 1];
 
-	for (const field of displayFields) {
-		if (value[field] !== undefined && value[field] !== null) {
-			return String(value[field]);
+		// Check if the value object has this field
+		if (value[lastField] !== undefined && value[lastField] !== null) {
+			return String(value[lastField]);
 		}
 	}
 
-	// If no display field found, stringify the object
+	// ✅ PRIORITY 2: If object has only one property, use it
+	// This handles cases where the object is a simple wrapper
+	const keys = Object.keys(value).filter(k => !k.startsWith('_')); // Ignore internal fields
+	if (keys.length === 1) {
+		return String(value[keys[0]]);
+	}
+
+	// ✅ PRIORITY 3: Fallback to JSON representation
+	// This gives users a clear view of what data exists
 	return JSON.stringify(value);
 }
 
