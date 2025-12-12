@@ -1114,8 +1114,10 @@ function transformToChartSeries(
 		const categoryField = chartConfig?.groupField || groupBy[0];
 
 		const categories = dataArray.map(item => {
-			const val = getNestedValue(item, categoryField);
-			return extractDisplayValue(val, categoryField);
+			// ✅ FIXED: Pass full item to extractDisplayValue
+			const displayValue = extractDisplayValue(item, categoryField);
+			console.log(`Extracting category from field "${categoryField}":`, displayValue); // Debug log
+			return displayValue;
 		});
 
 		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
