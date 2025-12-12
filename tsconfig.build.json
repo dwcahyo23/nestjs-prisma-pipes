@@ -5,15 +5,16 @@
 		"rootDir": "./src",
 		"declaration": true,
 		"declarationMap": true,
-		"removeComments": true
+		"sourceMap": true,
+		"removeComments": false
 	},
+	"include": [
+		"src/**/*"
+	],
 	"exclude": [
 		"node_modules",
 		"dist",
 		"**/*.spec.ts",
 		"**/*.test.ts"
-	],
-	"include": [
-		"src/**/*"
 	]
 }

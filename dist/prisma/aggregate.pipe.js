@@ -14,7 +14,13 @@ exports.manualAggregateForTimeSeries = manualAggregateForTimeSeries;
 const common_1 = require("@nestjs/common");
 const parse_object_literal_1 = __importDefault(require("../helpers/parse-object-literal"));
 const timezone_service_1 = __importDefault(require("./timezone.service"));
+/**
+ * Supported aggregation functions
+ */
 const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'];
+/**
+ * Get time key with timezone awareness
+ */
 function getTimeKeyWithTimezone(date, interval) {
     const localDate = timezone_service_1.default.utcToLocal(date);
     switch (interval) {
@@ -36,6 +42,9 @@ function getTimeKeyWithTimezone(date, interval) {
             return localDate.getUTCFullYear().toString();
     }
 }
+/**
+ * Parse aggregate function with parameters
+ */
 function parseAggregateFunction(value) {
     if (!value || typeof value !== 'string')
         return null;
@@ -51,10 +60,14 @@ function parseAggregateFunction(value) {
         params,
     };
 }
+/**
+ * Parse groupBy configuration
+ */
 function parseGroupBy(value) {
     if (!value || typeof value !== 'string')
         return null;
     const trimmed = value.trim();
+    // Must be wrapped in parentheses
     if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) {
         return null;
     }
@@ -63,9 +76,15 @@ function parseGroupBy(value) {
         return null;
     return fields.split(',').map(f => f.trim()).filter(Boolean);
 }
+/**
+ * Check if any groupBy field contains a relationship (has ".")
+ */
 function hasRelationshipInGroupBy(groupBy) {
     return groupBy.some(field => field.includes('.'));
 }
+/**
+ * Parse chart configuration
+ */
 function parseChartConfig(value) {
     if (!value || typeof value !== 'string')
         return null;
@@ -73,6 +92,7 @@ function parseChartConfig(value) {
     if (chartTypes.includes(value.toLowerCase())) {
         return { type: value.toLowerCase() };
     }
+    // Pattern baru: mendukung interval:year
     const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(value.trim());
     if (!match)
         return null;
@@ -101,6 +121,9 @@ function parseChartConfig(value) {
     }
     return options;
 }
+/**
+ * Generate time series labels
+ */
 function generateTimeSeriesLabels(interval, year) {
     const currentYear = year || new Date().getFullYear();
     const labels = [];
@@ -129,6 +152,9 @@ function generateTimeSeriesLabels(interval, year) {
     }
     return labels;
 }
+/**
+ * Get time key from date
+ */
 function getTimeKey(date, interval) {
     const d = date instanceof Date ? date : new Date(date);
     switch (interval) {
@@ -146,6 +172,9 @@ function getTimeKey(date, interval) {
             return d.getUTCFullYear().toString();
     }
 }
+/**
+ * Get nested property value - FIXED untuk array relationships
+ */
 function getNestedValue(obj, path) {
     const keys = path.split('.');
     let value = obj;
@@ -153,19 +182,33 @@ function getNestedValue(obj, path) {
         if (value == null)
             return null;
         value = value[key];
+        // ✅ NEW: Handle array relationships
         if (Array.isArray(value)) {
-            return null;
+            // For pivot tables, we need to flatten the array
+            // Example: productionEmployeePerformanceLeaders[].leaderNik
+            return null; // Will be handled specially in manual aggregation
         }
     }
     return value;
 }
+/**
+ * ✅ NEW: Detect if a field path is an array relationship
+ */
 function isArrayRelationship(path, prismaModel) {
+    // Check if this is a known array relationship pattern
+    // This would need to be enhanced based on your schema
     const arrayRelationPatterns = [
         'productionEmployeePerformanceLeaders',
         'productionEmployeePerformanceMachine',
+        // Add other array relationships here
     ];
     return arrayRelationPatterns.some(pattern => path.includes(pattern));
 }
+/**
+ * ✅ NEW: Flatten array relationships for grouping
+ * Converts: { productionEmployeePerformanceLeaders: [{ leaderNik: 'A' }, { leaderNik: 'B' }] }
+ * Into multiple records, one per leader
+ */
 function flattenArrayRelationships(data, groupByFields) {
     const arrayFields = groupByFields.filter(field => field.includes('.'));
     if (arrayFields.length === 0) {
@@ -173,6 +216,7 @@ function flattenArrayRelationships(data, groupByFields) {
     }
     const flattened = [];
     for (const item of data) {
+        // Find which groupBy field is an array relationship
         const arrayRelationField = arrayFields.find(field => {
             const relationName = field.split('.')[0];
             const value = item[relationName];
@@ -182,13 +226,16 @@ function flattenArrayRelationships(data, groupByFields) {
             const relationName = arrayRelationField.split('.')[0];
             const arrayValue = item[relationName];
             if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+                // Create one record per array item
                 for (const arrayItem of arrayValue) {
                     const flattenedItem = { ...item };
+                    // Replace array with single item
                     flattenedItem[relationName] = arrayItem;
                     flattened.push(flattenedItem);
                 }
             }
             else {
+                // No array items, skip or keep as null
                 const flattenedItem = { ...item };
                 flattenedItem[relationName] = null;
                 flattened.push(flattenedItem);
@@ -200,7 +247,11 @@ function flattenArrayRelationships(data, groupByFields) {
     }
     return flattened;
 }
+/**
+ * Enhanced manual aggregate with array relationship support
+ */
 async function manualAggregateWithRelationships(prismaModel, aggregates, groupBy, where) {
+    // Step 1: Build optimized select and include
     const scalarSelect = buildSelectForFields(groupBy, aggregates);
     const relationInclude = buildIncludeForRelationships(groupBy, aggregates);
     const queryOptions = { where };
@@ -217,10 +268,14 @@ async function manualAggregateWithRelationships(prismaModel, aggregates, groupBy
             queryOptions.include = relationInclude;
         }
     }
+    // Fetch data with optimized query
     const allData = await prismaModel.findMany(queryOptions);
+    // ✅ NEW: Flatten array relationships before grouping
     const flattenedData = flattenArrayRelationships(allData, groupBy);
+    // Step 2: Group data manually
     const groups = new Map();
     for (const item of flattenedData) {
+        // Build group key from groupBy fields
         const groupKey = groupBy.map(field => {
             const value = getNestedValue(item, field);
             return String(value ?? 'null');
@@ -230,9 +285,11 @@ async function manualAggregateWithRelationships(prismaModel, aggregates, groupBy
         }
         groups.get(groupKey).push(item);
     }
+    // Step 3: Calculate aggregates for each group
     const results = [];
     for (const [groupKey, items] of groups.entries()) {
         const result = {};
+        // Add group by fields to result
         const groupKeyParts = groupKey.split('|||');
         groupBy.forEach((field, idx) => {
             const { relation, field: fieldName } = field.includes('.')
@@ -248,6 +305,7 @@ async function manualAggregateWithRelationships(prismaModel, aggregates, groupBy
                 result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
             }
         });
+        // Calculate aggregates
         for (const agg of aggregates) {
             const { function: func, field } = agg;
             const funcKey = `_${func}`;
@@ -282,7 +340,11 @@ async function manualAggregateWithRelationships(prismaModel, aggregates, groupBy
     }
     return results;
 }
+/**
+ * Enhanced manual aggregate for time series with array relationship support
+ */
 async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, dateField, interval, year, where) {
+    // Step 1: Fetch data
     const scalarSelect = buildSelectForFields([...groupBy, dateField], aggregates);
     const relationInclude = buildIncludeForRelationships([...groupBy, dateField], aggregates);
     const queryOptions = { where };
@@ -300,6 +362,7 @@ async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, da
         }
     }
     const allData = await prismaModel.findMany(queryOptions);
+    // ✅ Filter by year if specified
     let filteredData = allData;
     if (year) {
         filteredData = allData.filter((item) => {
@@ -325,10 +388,13 @@ async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, da
             }
         });
     }
+    // ✅ NEW: Flatten array relationships
     const flattenedData = flattenArrayRelationships(filteredData, groupBy);
+    // Step 2: Extract year range
     const yearRange = year
         ? { minYear: year, maxYear: year }
         : extractYearRangeFromData(flattenedData, dateField, interval);
+    // Step 3: Group data
     const groups = new Map();
     for (const item of flattenedData) {
         const dateValue = getNestedValue(item, dateField);
@@ -347,6 +413,7 @@ async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, da
         }
         groups.get(compositeKey).push(item);
     }
+    // Step 4: Calculate aggregates
     const results = [];
     for (const [compositeKey, items] of groups.entries()) {
         const result = {};
@@ -404,26 +471,36 @@ async function manualAggregateForTimeSeries(prismaModel, aggregates, groupBy, da
     }
     return results;
 }
+/**
+ * Detect date field format type
+ */
 function detectDateFieldType(value) {
     if (!value)
         return 'unknown';
     const str = String(value).trim();
+    // Try parsing as full date
     const dateTest = new Date(str);
     if (!isNaN(dateTest.getTime()) && str.includes('-')) {
         return 'date';
     }
+    // Check if it's a 4-digit year
     if (/^\d{4}$/.test(str)) {
         return 'year';
     }
+    // Check if it's a month (01-12 or January-December)
     if (/^(0?[1-9]|1[0-2])$/.test(str) ||
         /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(str)) {
         return 'month';
     }
+    // Check if it's a day (01-31)
     if (/^(0?[1-9]|[12]\d|3[01])$/.test(str)) {
         return 'day';
     }
     return 'unknown';
 }
+/**
+ * Extract year range from actual data
+ */
 function extractYearRangeFromData(dataArray, dateField, interval) {
     if (!dataArray || dataArray.length === 0)
         return null;
@@ -457,6 +534,9 @@ function extractYearRangeFromData(dataArray, dateField, interval) {
         maxYear: Math.max(...years)
     };
 }
+/**
+ * Generate time series labels - FIXED untuk year interval
+ */
 function generateTimeSeriesLabelsEnhanced(interval, yearRange, specifiedYear) {
     const labels = [];
     const currentYear = new Date().getFullYear();
@@ -506,6 +586,9 @@ function generateTimeSeriesLabelsEnhanced(interval, yearRange, specifiedYear) {
     }
     return labels;
 }
+/**
+ * Parse string value to standardized format based on interval
+ */
 function parseStringToTimeKey(value, interval, contextYear, contextMonth) {
     if (!value)
         return null;
@@ -571,6 +654,9 @@ function parseStringToTimeKey(value, interval, contextYear, contextMonth) {
         }
     }
 }
+/**
+ * Enhanced getTimeKey that handles string dates with timezone awareness
+ */
 function getTimeKeyEnhanced(value, interval, contextYear, contextMonth) {
     if (value instanceof Date) {
         return getTimeKeyWithTimezone(value, interval);
@@ -588,8 +674,12 @@ function getTimeKeyEnhanced(value, interval, contextYear, contextMonth) {
     catch { }
     return String(value ?? 'null');
 }
+/**
+ * Transform data to chart series format
+ */
 function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
     const dataArray = Array.isArray(data) ? data : [];
+    // Empty data handling
     if (!dataArray || dataArray.length === 0) {
         const series = aggregates.map(agg => ({
             name: `${agg.function}(${agg.field})`,
@@ -604,11 +694,15 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
             raw: [],
         };
     }
+    // TIME SERIES CHART - ENHANCED
     if (chartConfig?.dateField && chartConfig?.interval) {
         const nonDateGroupFields = groupBy?.filter(field => field !== chartConfig.dateField) || [];
         const hasGrouping = nonDateGroupFields.length > 0;
+        // Extract year range dari data aktual
         const yearRange = extractYearRangeFromData(dataArray, chartConfig.dateField, chartConfig.interval);
+        // Generate labels berdasarkan data aktual
         const timeLabels = generateTimeSeriesLabelsEnhanced(chartConfig.interval, yearRange || undefined, chartConfig.year);
+        // GROUPED TIME SERIES
         if (hasGrouping) {
             const groupField = chartConfig.groupField || nonDateGroupFields[0];
             const groupedDataMap = new Map();
@@ -661,6 +755,7 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
                 raw: dataArray,
             };
         }
+        // REGULAR TIME SERIES
         const dataMap = new Map();
         dataArray.forEach(item => {
             const dateValue = getNestedValue(item, chartConfig.dateField);
@@ -703,6 +798,7 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
             raw: dataArray,
         };
     }
+    // GROUPED (non-time-series) CHART
     if (groupBy && groupBy.length > 0) {
         const categoryField = chartConfig?.groupField || groupBy[0];
         const categories = dataArray.map(item => {
@@ -732,6 +828,7 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
             raw: dataArray,
         };
     }
+    // REGULAR CHART (no grouping)
     const categories = dataArray.map((_, idx) => `Category ${idx + 1}`);
     const series = aggregates.map((agg) => {
         const { function: func, field } = agg;
@@ -753,12 +850,18 @@ function transformToChartSeries(data, aggregates, chartConfig, groupBy) {
         raw: dataArray,
     };
 }
+/**
+ * Parse relationship path into relation name and field
+ */
 function parseRelationshipPath(path) {
     const parts = path.split('.');
     const field = parts.pop();
     const relation = parts.join('.');
     return { relation, field };
 }
+/**
+ * Build select object for scalar fields
+ */
 function buildSelectForFields(allFields, aggregates) {
     const select = {};
     for (const field of allFields) {
@@ -773,6 +876,9 @@ function buildSelectForFields(allFields, aggregates) {
     }
     return select;
 }
+/**
+ * Build include object for relationships
+ */
 function buildIncludeForRelationships(allFields, aggregates) {
     const include = {};
     const relationPaths = [
@@ -787,6 +893,7 @@ function buildIncludeForRelationships(allFields, aggregates) {
             const part = parts[i];
             if (i === parts.length - 1) {
                 if (!current[part]) {
+                    // ✅ Default to include all for array relationships
                     current[part] = { select: {} };
                 }
                 if (typeof current[part] === 'object' && 'select' in current[part]) {
@@ -805,6 +912,9 @@ function buildIncludeForRelationships(allFields, aggregates) {
     }
     return include;
 }
+/**
+ * Aggregate Pipe - FIXED untuk time series tanpa groupBy datetime
+ */
 let AggregatePipe = class AggregatePipe {
     transform(value) {
         if (!value || value.trim() === '')
@@ -854,19 +964,22 @@ let AggregatePipe = class AggregatePipe {
             if (aggregates.length === 0) {
                 throw new common_1.BadRequestException('At least one aggregate function is required');
             }
+            // ✅ KEY FIX: Deteksi time series chart
             const isTimeSeriesChart = !!(chartConfig?.dateField && chartConfig?.interval);
             if (isTimeSeriesChart) {
+                // TIME SERIES: Gunakan manual aggregation, JANGAN tambahkan dateField ke groupBy
                 const finalGroupBy = groupByFields.filter(f => f !== chartConfig.dateField);
                 return {
                     prismaQuery: null,
                     aggregates,
-                    groupBy: finalGroupBy,
+                    groupBy: finalGroupBy, // ✅ groupBy TANPA dateField
                     isGrouped: true,
                     chartConfig,
                     useManualAggregation: true,
-                    isTimeSeries: true,
+                    isTimeSeries: true, // ✅ Flag baru
                 };
             }
+            // NON-TIME-SERIES: Logic yang sama seperti sebelumnya
             let finalGroupBy = [];
             if (groupByFields.length > 0) {
                 finalGroupBy = groupByFields;
@@ -920,14 +1033,26 @@ let AggregatePipe = class AggregatePipe {
             throw new common_1.BadRequestException('Invalid aggregate query format');
         }
     }
+    /**
+     * Execute aggregate query - FIXED dengan time series support
+     */
     static async execute(prismaModel, aggregateConfig, where) {
+        // ✅ TIME SERIES: Pass year parameter ke manual aggregation
         if (aggregateConfig.isTimeSeries && aggregateConfig.chartConfig?.dateField) {
-            const result = await manualAggregateForTimeSeries(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, aggregateConfig.chartConfig.dateField, aggregateConfig.chartConfig.interval, aggregateConfig.chartConfig.year, where);
+            const result = await manualAggregateForTimeSeries(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, aggregateConfig.chartConfig.dateField, aggregateConfig.chartConfig.interval, aggregateConfig.chartConfig.year, // ✅ Pass year parameter
+            where);
+            // // ✅ DEBUG: Log untuk memverifikasi data
+            // console.log('Execute result count:', result.length);
+            // if (result.length > 0) {
+            // 	console.log('Sample data:', result[0]);
+            // }
             return result;
         }
+        // Manual aggregation untuk relationships (non-time-series)
         if (aggregateConfig.useManualAggregation) {
             return manualAggregateWithRelationships(prismaModel, aggregateConfig.aggregates, aggregateConfig.groupBy, where);
         }
+        // Prisma native aggregation
         if (aggregateConfig.isGrouped) {
             return prismaModel.groupBy({
                 ...aggregateConfig.prismaQuery,
@@ -939,6 +1064,9 @@ let AggregatePipe = class AggregatePipe {
             where,
         });
     }
+    /**
+     * Transform to chart series - sama seperti sebelumnya
+     */
     static toChartSeries(data, aggregateConfig) {
         if (!aggregateConfig.isGrouped) {
             if (!data || (Array.isArray(data) && data.length === 0)) {
@@ -989,6 +1117,9 @@ AggregatePipe = __decorate([
     (0, common_1.Injectable)()
 ], AggregatePipe);
 exports.default = AggregatePipe;
+/**
+ * Build Prisma aggregate object
+ */
 function buildPrismaAggregate(aggregates) {
     const aggregateObj = {};
     for (const agg of aggregates) {

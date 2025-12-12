@@ -20,6 +20,7 @@
 		}
 	},
 	"scripts": {
+		"clean-w": "rimraf dist",
 		"clean": "rm -rf dist",
 		"build": "tsc -p tsconfig.build.json",
 		"prepublishOnly": "npm run build",
