@@ -1,329 +1,105 @@
-# Changelog
 
-All notable changes to this project will be documented in this file.
+## [2.4.11] - 2025
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+### 🔗 Added - Many-to-Many Pivot Table Aggregation Support
+
+Added automatic support for aggregating data through many-to-many relationships and pivot tables.
+
+#### What's New
+- ✅ Automatic pivot table flattening for proper aggregation
+- ✅ Supports array relationships in groupBy (e.g., `pivotTable.field`)
+- ✅ Works with all chart types and time series
+- ✅ Accurate aggregation for many-to-many patterns
+
+#### Examples
+
+**Employee Performance by Leader:**
+```bash
+GET /performance?aggregate=s:avg(),p:avg(),pd:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:radar(productionEmployeePerformanceLeaders.leaderNik)
+```
+
+**Production by Machine:**
+```bash
+GET /performance?aggregate=output:sum(),groupBy:(productionEmployeePerformanceMachine.mcCode),chart:bar(productionEmployeePerformanceMachine.mcCode)
+```
+
+**Time Series with Pivot:**
+```bash
+GET /performance?aggregate=s:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:line(date,month:2025)
+```
+
+#### How It Works
+1. Detects array relationships in groupBy fields
+2. Flattens pivot table records (1 record with N pivots → N records)
+3. Performs normal aggregation with flattened data
+4. Returns accurate results for many-to-many analysis
+
+#### Schema Pattern
+```prisma
+model ProductionEmployeePerformance {
+  id     String
+  s      Float
+  
+  // One-to-many to pivot
+  productionEmployeePerformanceLeaders ProductionEmployeePerformanceLeader[]
+}
+
+model ProductionEmployeePerformanceLeader {
+  id            String
+  performanceId String
+  leaderNik     String
+  
+  performance ProductionEmployeePerformance @relation(...)
+  
+  @@unique([performanceId, leaderNik])
+}
+```
+
+#### Migration
+No breaking changes! Existing queries continue to work.
+
+**See detailed documentation:** [AggregatePipe.md - Many-to-Many Section](./docs/AGGREGATE_PIPE.md#many-to-many-pivot-table-grouping)
 
 ---
 
-## [2.5.0] - 2025-01-XX 🌍 NEW
+## [2.4.10] - 2025
 
 ### 🌍 Added - Timezone Configuration Support
 
-#### Overview
-Added global timezone configuration for all date operations across WherePipe and AggregatePipe. Now you can configure your application timezone once and all date filtering and time series grouping will respect that timezone.
+Added global timezone configuration for all date operations.
 
-#### Features
+#### What's New
+- ✅ Configure timezone once at app startup
+- ✅ All date filters respect configured timezone
+- ✅ Time series grouping uses local timezone
+- ✅ No manual timezone conversion needed
 
-**Global Timezone Configuration**
+#### Configuration
 ```typescript
 import { configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
 
-// Configure once at app startup
+// Configure once in main.ts
 configurePipesTimezone({
   offset: '+07:00',
   name: 'Asia/Jakarta',
 });
 ```
 
-**Automatic Date Handling**
-- Date strings without timezone automatically get configured timezone
-- Date filtering respects configured timezone
-- Time series grouping uses configured timezone
-- No manual timezone conversion needed
-
-**Timezone Service API**
-```typescript
-import { TimezoneService, getPipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
-
-// Get current configuration
-const timezone = getPipesTimezone();
-// { offset: '+07:00', name: 'Asia/Jakarta', offsetHours: 7 }
-
-// Check if configured
-TimezoneService.isConfigured(); // true
-
-// Reset to UTC
-TimezoneService.reset();
-```
-
-#### What Changed
-
-**Before (v2.4.6):**
+#### Examples
 ```bash
-# Problem: Date filter using UTC
-GET /api/orders?filter=orderDate:gte+date(2025-11-01)
-# Interpreted as: 2025-11-01T00:00:00.000Z (UTC)
-# Misses data: 2025-11-01 00:11:36+07 → 2025-10-31T17:11:36Z ❌
+# Date filters now respect timezone
+GET /orders?filter=orderDate:gte+date(2025-11-01)
+
+# Time series uses local timezone
+GET /analytics?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
 ```
 
-**After (v2.5.0):**
-```typescript
-// Configure timezone once
-configurePipesTimezone({ offset: '+07:00' });
-```
+#### Benefits
+- Date boundaries align with local business hours
+- Time series charts group correctly by local time
+- Consistent behavior across all pipes
 
-```bash
-# Now respects Jakarta timezone
-GET /api/orders?filter=orderDate:gte+date(2025-11-01)
-# Interpreted as: 2025-11-01T00:00:00+07:00 (Jakarta)
-# Correctly includes: 2025-11-01 00:11:36+07 ✅
-```
-
-#### Implementation Details
-
-**WherePipe Integration:**
-```typescript
-// Automatic timezone handling in date parsing
-function parseStringToDate(ruleValue: string): string {
-  const content = extractParenthesesContent(ruleValue);
-  
-  // ✅ Adds configured timezone if missing
-  const dateString = TimezoneService.addTimezoneToDateString(content);
-  return new Date(dateString).toISOString();
-}
-```
-
-**AggregatePipe Integration:**
-```typescript
-// Time series grouping with timezone awareness
-function getTimeKeyEnhanced(value: Date | string, interval: TimeInterval): string {
-  // ✅ Converts to local timezone for grouping
-  const localDate = TimezoneService.utcToLocal(date);
-  
-  // Groups in local timezone
-  return getTimeKey(localDate, interval);
-}
-```
-
-#### Configuration Methods
-
-**1. Direct Configuration (main.ts)**
-```typescript
-import { NestFactory } from '@nestjs/core';
-import { configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  
-  configurePipesTimezone({
-    offset: '+07:00',
-    name: 'Asia/Jakarta',
-  });
-  
-  await app.listen(3000);
-}
-```
-
-**2. Environment Variables**
-```env
-TIMEZONE_OFFSET=+07:00
-TIMEZONE_NAME=Asia/Jakarta
-```
-
-```typescript
-import { ConfigService } from '@nestjs/config';
-
-const configService = app.get(ConfigService);
-configurePipesTimezone({
-  offset: configService.get('TIMEZONE_OFFSET', '+07:00'),
-  name: configService.get('TIMEZONE_NAME', 'Asia/Jakarta'),
-});
-```
-
-**3. Module Configuration**
-```typescript
-import { PipesModule } from '@dwcahyo/nestjs-prisma-pipes';
-
-@Module({
-  imports: [
-    PipesModule.forRoot({
-      offset: '+07:00',
-      name: 'Asia/Jakarta',
-    }),
-  ],
-})
-export class AppModule {}
-```
-
-#### Use Cases
-
-**1. E-Commerce Platform**
-```typescript
-// Jakarta timezone for Indonesian e-commerce
-configurePipesTimezone({ offset: '+07:00', name: 'Asia/Jakarta' });
-
-// Date filters now work correctly
-GET /orders?filter=orderDate:gte+date(2025-11-01),orderDate:lte+date(2025-11-30)
-```
-
-**2. Multi-Region Application**
-```typescript
-// Set default timezone
-configurePipesTimezone({ offset: '+07:00', name: 'Asia/Jakarta' });
-
-// Time series respects timezone
-GET /analytics/sales?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
-```
-
-**3. Financial Reporting**
-```typescript
-// Ensure fiscal year aligns with local timezone
-configurePipesTimezone({ offset: '+07:00' });
-
-// Monthly reports use local timezone
-GET /reports/revenue?aggregate=total:sum(),groupBy:(month),chart:bar(date,month:2025)
-```
-
-#### API Reference
-
-**configurePipesTimezone(config)**
-```typescript
-interface TimezoneConfig {
-  offset: string;      // e.g., '+07:00', '-05:00'
-  name: string;        // e.g., 'Asia/Jakarta', 'America/New_York'
-  offsetHours?: number; // Auto-calculated from offset
-}
-
-function configurePipesTimezone(config: Partial<TimezoneConfig>): void;
-```
-
-**getPipesTimezone()**
-```typescript
-function getPipesTimezone(): TimezoneConfig;
-
-// Example:
-const tz = getPipesTimezone();
-// { offset: '+07:00', name: 'Asia/Jakarta', offsetHours: 7 }
-```
-
-**TimezoneService Methods**
-```typescript
-class TimezoneService {
-  setTimezone(config: Partial<TimezoneConfig>): void;
-  getTimezone(): TimezoneConfig;
-  addTimezoneToDateString(dateString: string): string;
-  utcToLocal(date: Date): Date;
-  localToUtc(date: Date): Date;
-  isConfigured(): boolean;
-  reset(): void;
-}
-```
-
-#### Supported Timezone Formats
-
-**Offset Format:**
-```typescript
-'+07:00'  // Jakarta, Bangkok, Hanoi
-'+05:30'  // India, Sri Lanka
-'-05:00'  // New York (EST)
-'-08:00'  // Los Angeles (PST)
-'+00:00'  // UTC, London (GMT)
-'+09:00'  // Tokyo, Seoul
-```
-
-**Date String Formats Supported:**
-```typescript
-'2025-11-01'                    // Date only
-'2025-11-01T10:30:00'          // Date with time
-'2025-11-01T10:30:00.123'      // Date with milliseconds
-'2025-11-01T10:30:00+07:00'    // Already has timezone (preserved)
-'2025-11-01T10:30:00Z'         // UTC (preserved)
-```
-
-#### Migration Guide
-
-**From v2.4.6 to v2.5.0:**
-
-No breaking changes! This is a backward-compatible enhancement.
-
-**Step 1:** Add timezone configuration to `main.ts`
-```typescript
-import { configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
-
-configurePipesTimezone({
-  offset: '+07:00',
-  name: 'Asia/Jakarta',
-});
-```
-
-**Step 2:** Test your date filters
-```bash
-# Before: May have missed data
-GET /api/orders?filter=orderDate:gte+date(2025-11-01)
-
-# After: Should include all data correctly
-GET /api/orders?filter=orderDate:gte+date(2025-11-01)
-```
-
-**Step 3:** Verify time series charts
-```bash
-# Check that months/days group correctly
-GET /api/stats?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
-```
-
-#### Important Notes
-
-1. **Configure Once**: Call `configurePipesTimezone()` only once at application startup
-2. **Before First Request**: Must be configured before handling any requests
-3. **Global Effect**: Affects all pipes globally (WherePipe, AggregatePipe)
-4. **Default UTC**: If not configured, defaults to UTC (+00:00)
-5. **Thread-Safe**: Uses singleton pattern for consistent behavior
-
-#### Performance
-
-- ✅ **Zero Performance Impact**: Timezone conversion is lightweight
-- ✅ **No Memory Overhead**: Singleton pattern, single instance
-- ✅ **No Database Changes**: Works with existing database timezone settings
-
-#### TypeScript Support
-
-Full TypeScript support with proper types:
-
-```typescript
-import { 
-  configurePipesTimezone, 
-  getPipesTimezone,
-  TimezoneConfig,
-  TimezoneService 
-} from '@dwcahyo/nestjs-prisma-pipes';
-
-// Type-safe configuration
-const config: TimezoneConfig = {
-  offset: '+07:00',
-  name: 'Asia/Jakarta',
-  offsetHours: 7, // Optional, auto-calculated
-};
-
-configurePipesTimezone(config);
-```
-
-#### Testing
-
-```typescript
-// timezone.service.spec.ts
-import TimezoneService from './timezone.service';
-
-describe('TimezoneService', () => {
-  afterEach(() => {
-    TimezoneService.reset();
-  });
-
-  it('should add timezone to date string', () => {
-    TimezoneService.setTimezone({ offset: '+07:00' });
-    const result = TimezoneService.addTimezoneToDateString('2025-11-01');
-    expect(result).toBe('2025-11-01T00:00:00+07:00');
-  });
-
-  it('should convert UTC to local', () => {
-    TimezoneService.setTimezone({ offset: '+07:00' });
-    const utcDate = new Date('2025-11-01T00:00:00.000Z');
-    const localDate = TimezoneService.utcToLocal(utcDate);
-    expect(localDate.getUTCHours()).toBe(7);
-  });
-});
-```
+**See detailed documentation:** [Timezone Configuration](./docs/TIMEZONE.md)
 
 ---
 
@@ -331,434 +107,175 @@ describe('TimezoneService', () => {
 
 ### 🚀 Added - Manual Aggregation for Nested Relationships
 
-#### Overview
-Prisma's `groupBy` doesn't support relationship fields directly. This version introduces **automatic manual aggregation** that seamlessly handles relationship fields by fetching data with `include` and performing aggregation in-memory.
+Added automatic support for relationship fields in groupBy.
 
-#### The Problem
-```typescript
-// ❌ This doesn't work with Prisma
-groupBy: {
-  by: ['marketingMasterCategory.category'] // Error: Can't group by relation
-}
-```
-
-#### The Solution
-```bash
-# ✅ This now works automatically!
-?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
-```
-
-#### Features
-
-**🔍 Auto-Detection**
-- Automatically detects relationship fields (fields containing `.`)
-- Seamlessly switches between Prisma native and manual aggregation
-- No configuration needed
-
-**🔄 Seamless Fallback**
-```typescript
-// Simple fields → Prisma native groupBy (faster)
-?aggregate=qty: sum(), groupBy: (category)
-
-// Relationship fields → Manual aggregation (automatic)
-?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
-```
-
-**🔗 Auto-Include**
-- Automatically builds `include` objects for relationships
-- Supports nested relationships
-- Optimized field selection
-
-**📊 Chart Compatible**
-- Works with all chart types: bar, line, pie, area, donut
-- Supports time series with relationships
-- Stacked and grouped charts
-
-**🎯 Type Safe**
-- Full TypeScript support
-- Proper type inference
-- No type casting needed
-
-**✨ Simple API**
-```typescript
-// Single method handles everything
-const data = await AggregatePipe.execute(
-  this.prisma.product,
-  aggregate,
-  filter
-);
-
-return AggregatePipe.toChartSeries(data, aggregate);
-```
-
-#### Processing Flow
-
-```
-1. Detect Relationship (field contains '.')
-   ↓
-2. Build Include Object (fetch related data)
-   ↓
-3. Fetch All Data with Relations
-   ↓
-4. Group Data by Composite Key (in-memory)
-   ↓
-5. Calculate Aggregates (sum, avg, min, max, count)
-   ↓
-6. Return Prisma-Compatible Format
-```
+#### What's New
+- ✅ Group by relationship fields (e.g., `category.name`)
+- ✅ Automatic fallback to manual aggregation
+- ✅ Works with all aggregate functions
+- ✅ Chart compatible
 
 #### Examples
-
-**Simple Relationship:**
 ```bash
-GET /products/stats?aggregate=qty: sum(), groupBy: (marketingMasterCategory.category)
+# Group by relationship field
+GET /products?aggregate=qty:sum(),groupBy:(marketingMasterCategory.category)
+
+# Multiple relationships
+GET /products?aggregate=qty:sum(),groupBy:(warehouse.region,category.name)
+
+# With charts
+GET /products?aggregate=qty:sum(),groupBy:(category.name),chart:bar(category.name)
 ```
 
-**Multiple Relationships:**
-```bash
-GET /products/stats?aggregate=qty: sum(), groupBy: (warehouse.region, marketingMasterCategory.category)
-```
-
-**With Chart:**
-```bash
-GET /products/stats?aggregate=qty: sum(), recQty: sum(), groupBy: (marketingMasterCategory.category), chart: bar(marketingMasterCategory.category, horizontal)
-```
-
-**Time Series with Relationships:**
-```bash
-GET /orders/stats?aggregate=revenue: sum(), groupBy: (customer.segment, orderDate), chart: line(orderDate, month)
-```
-
-#### Service Implementation
-
-```typescript
-import { AggregatePipe } from '@dwcahyo/nestjs-prisma-pipes';
-
-async stat(filter?: Pipes.Where, aggregate?: Pipes.Aggregate) {
-  // Handles both simple and relationship aggregations automatically
-  const data = await AggregatePipe.execute(
-    this.prisma.product,
-    aggregate,
-    filter
-  );
-
-  return AggregatePipe.toChartSeries(data, aggregate);
-}
-```
-
-#### Performance Considerations
-
-| Aspect | Prisma groupBy | Manual Aggregation |
-|--------|---------------|-------------------|
-| **Speed** | ⚡ Faster (database-level) | 🔸 Slower (in-memory) |
-| **Memory** | ✅ Minimal | ⚠️ Loads all data |
-| **Relationships** | ❌ Not supported | ✅ Fully supported |
-| **Flexibility** | 🔸 Limited | ✅ Full control |
-| **Use Case** | Simple fields | Nested relationships |
-
-**Best Practices:**
-1. Use simple fields when possible (faster)
-2. Add WHERE filters to reduce data volume
-3. Add database indexes on relationship keys
-4. Consider caching for frequently accessed aggregations
-5. Use pagination for very large datasets
-
-#### Migration from v2.4.2
-
-**Before:**
-```typescript
-// Would fail with relationship fields
-const data = await this.prisma.product.groupBy({
-  where: filter,
-  ...aggregate.prismaQuery, // Error!
-});
-```
-
-**After:**
-```typescript
-// Works automatically
-const data = await AggregatePipe.execute(
-  this.prisma.product,
-  aggregate,
-  filter
-);
-```
+**See detailed documentation:** [AggregatePipe.md - Relationship Grouping](./docs/AGGREGATE_PIPE.md#relationship-grouping)
 
 ---
 
-### 🚀 Added - Year Parameter Support for Time Series
+### 📅 Added - Year Parameter Support for Time Series
 
-#### Overview
-Added support for specifying exact years in time series charts to control the time range displayed.
+Added year parameter to control time range in charts.
 
-#### Syntax
+#### Examples
 ```bash
-chart: line(dateField, interval:year)
-chart: bar(dateField, month:year)
+# Show specific year
+GET /analytics?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
+
+# Year range for yearly charts
+GET /analytics?aggregate=sales:sum(),chart:line(saleDate,year:2025)
 ```
 
-#### Features
-
-**🎯 Exact Year Control**
-```bash
-# Show only Jan 2025 - Dec 2025
-?aggregate=revenue: sum(), chart: line(orderDate, month:2025)
-```
-
-**📅 Year Range Control**
-```bash
-# Show 5 years ending 2025 (2021-2025)
-?aggregate=sales: sum(), chart: line(saleDate, year:2025)
-```
-
-**🔄 Auto-Detection Fallback**
-```bash
-# Automatically detects from data if year not specified
-?aggregate=revenue: sum(), chart: line(orderDate, month)
-```
-
-**📊 Consistent Labels**
-```bash
-# Ensures chart labels match the specified year
-GET /orders/stats?aggregate=revenue: sum(), groupBy: (status), chart: line(orderDate, month:2025)
-
-# Result: ["Jan 2025", "Feb 2025", ..., "Dec 2025"]
-```
-
-#### Behavior by Interval
-
-| Interval | Without Year | With Year |
-|----------|-------------|-----------|
-| **month** | Auto-detects from data | Shows 12 months of specified year |
-| **year** | Shows 5 years (current - 4 to current) | Shows 5 years (specified - 4 to specified) |
-| **day** | Auto-detects from data | Shows all 365/366 days of specified year |
-
-#### Use Cases
-
-**Annual Reports:**
-```bash
-# Lock charts to specific fiscal year
-?aggregate=sales: sum(), chart: line(saleDate, month:2024)
-```
-
-**Historical Comparison:**
-```bash
-# Compare specific years
-?aggregate=orders: count(), chart: bar(orderDate, year:2025)
-```
-
-**Budget Planning:**
-```bash
-# Project data for upcoming year
-?aggregate=forecast: sum(), chart: line(projectionDate, month:2026)
-```
-
-**YoY Analysis:**
-```bash
-# 2024 data
-?aggregate=revenue: sum(), chart: line(date, month:2024)
-
-# 2025 data (for comparison)
-?aggregate=revenue: sum(), chart: line(date, month:2025)
-```
-
-#### Pattern Matching
-
-```typescript
-// Basic time series
-"line(orderDate, month)"        // Auto-detect year
-
-// With year parameter
-"line(orderDate, month:2025)"   // Jan 2025 - Dec 2025
-"bar(orderDate, year:2025)"     // 2021-2025
-"area(orderDate, day:2024)"     // All days in 2024
-
-// Combined with grouping
-"line(orderDate, month:2025), groupBy: (status)"  // Multi-series
-```
-
-#### Priority Order
-
-1. **Specified Year** (`month:2025`) - Highest priority
-2. **Data Year Range** (auto-detected from data)
-3. **Current Year** (fallback if no data)
-
-#### Migration
-
-No breaking changes! Existing queries work as before:
-
-```bash
-# Old behavior (still works)
-?aggregate=qty: sum(), chart: line(orderDate, month)
-
-# New behavior (optional enhancement)
-?aggregate=qty: sum(), chart: line(orderDate, month:2025)
-```
+**See detailed documentation:** [AggregatePipe.md - Time Series](./docs/AGGREGATE_PIPE.md#time-series)
 
 ---
 
 ## [2.4.2] - 2025
 
-### 🚀 Enhanced - Grouped Time Series Support
+### 📊 Enhanced - Grouped Time Series Support
 
-Added support for combining time series with categorical grouping, enabling multi-series time-based charts.
+Added support for combining time series with categorical grouping.
 
-**Features:**
-- Group time series data by additional categorical fields
-- Automatic series generation for each group
-- Stacked time series charts
-- Compatible with all chart types
-
-**Example:**
+#### Examples
 ```bash
-# Revenue by status per month
-?aggregate=revenue: sum(), groupBy: (status), chart: line(orderDate, month)
+# Multi-series time chart
+GET /analytics?aggregate=revenue:sum(),groupBy:(status),chart:line(orderDate,month:2025)
 
-# Sales by region with stacking
-?aggregate=sales: sum(), groupBy: (region, category), chart: bar(date, month, stacked)
+# Stacked time series
+GET /analytics?aggregate=sales:sum(),groupBy:(region),chart:area(date,month:2025,stacked)
 ```
 
 ---
 
-## [2.4.0] - 2024
+## [2.4.0] - 2025
 
 ### 🎨 Added - Chart Configuration
 
-Added chart type support to aggregate queries.
+Added chart type support with 5 chart types: bar, line, pie, area, donut.
 
-**Features:**
-- Bar, line, pie, area, and donut charts
-- Time series support (day, month, year intervals)
-- Stacked and horizontal orientations
-- Automatic data transformation to chart format
-
-**Examples:**
+#### Examples
 ```bash
-?aggregate=revenue: sum(), chart: bar(category)
-?aggregate=orders: count(), chart: line(orderDate, month)
-?aggregate=sales: sum(), chart: pie(region)
+GET /analytics?aggregate=revenue:sum(),chart:bar(category)
+GET /analytics?aggregate=orders:count(),chart:line(orderDate,month)
 ```
 
 ---
 
-## [2.3.0] - 2024
+## [2.3.0] - 2025
 
 ### 🔢 Added - Aggregate Support
 
-Added aggregate functions to pipes.
+Added aggregate functions: sum, avg, min, max, count with groupBy support.
 
-**Features:**
-- sum, avg, min, max, count
-- groupBy support
-- Multiple aggregates in single query
-
-**Examples:**
+#### Examples
 ```bash
-?aggregate=price: sum(), quantity: avg()
-?aggregate=revenue: sum(), groupBy: (category)
+GET /analytics?aggregate=price:sum(),quantity:avg()
+GET /analytics?aggregate=revenue:sum(),groupBy:(category)
 ```
 
 ---
 
-## [2.2.0] - 2024
+## [2.2.0] - 2025
 
 ### 🔗 Added - Include Pipe
 
 Added support for including relations.
 
-**Features:**
-- Single and multiple relations
-- Nested relations
-- Auto-include building
-
-**Examples:**
+#### Examples
 ```bash
-?include=category
-?include=category,reviews,warehouse
-?include=category,reviews.user
+GET /api/products?include=category,reviews
+GET /api/products?include=category,reviews.user
 ```
 
 ---
 
-## [2.1.0] - 2024
+## [2.1.0] - 2025
 
 ### 📝 Added - Select Pipe
 
 Added support for field selection.
 
-**Features:**
-- Select specific fields
-- Nested field selection
-- Performance optimization
-
-**Examples:**
+#### Examples
 ```bash
-?fields=id,name,price
-?fields=id,name,category.name
+GET /api/products?fields=id,name,price
+GET /api/products?fields=id,name,category.name
 ```
 
 ---
 
-## [2.0.0] - 2024
+## [2.0.0] - 2025
 
 ### 🔄 Added - OrderBy Pipe
 
-Added support for sorting.
+Added support for sorting with multiple fields.
 
-**Features:**
-- Ascending and descending sort
-- Multiple field sorting
-- Nested relation sorting
-
-**Examples:**
+#### Examples
 ```bash
-?sort=price
-?sort=-price
-?sort=category,-price,name
+GET /api/products?sort=price
+GET /api/products?sort=-price,name
 ```
 
 ---
 
-## [1.0.0] - 2024
+## [1.0.0] - 2025
 
 ### 🎉 Initial Release
 
-**Features:**
-- WherePipe for filtering
+Core filtering features with WherePipe.
+
+#### Features
 - Type casting (int, float, bool, date, array)
-- Comparison operators
-- String matching operators
-- Array operators
-- Multiple conditions
+- Comparison operators (eq, ne, gt, gte, lt, lte)
+- String operators (contains, startsWith, endsWith)
+- Array operators (in, notIn, has, hasEvery, hasSome)
 - Nested relations
 
-**Examples:**
+#### Examples
 ```bash
-?filter=price:gte+int(100)
-?filter=name:contains+banana
-?filter=tags:in+array(electronics,gadgets)
-?filter=category.name:electronics
+GET /api/products?filter=price:gte+int(100)
+GET /api/products?filter=name:contains+banana
+GET /api/products?filter=category.name:electronics
 ```
 
 ---
 
-## Version History
+## Version Summary
 
-- **v2.5.0** - Timezone Configuration
-- **v2.4.6** - Manual Aggregation for Relationships + Year Parameters
-- **v2.4.2** - Grouped Time Series
-- **v2.4.0** - Chart Configuration
-- **v2.3.0** - Aggregate Functions
-- **v2.2.0** - Include Pipe
-- **v2.1.0** - Select Pipe
-- **v2.0.0** - OrderBy Pipe
-- **v1.0.0** - Initial Release (WherePipe)
+| Version | Feature | Description |
+|---------|---------|-------------|
+| **2.4.11** | Many-to-Many | Pivot table aggregation |
+| **2.4.10** | Timezone | Global timezone config |
+| **2.4.6** | Relationships | Nested field grouping + year params |
+| **2.4.2** | Grouped Series | Time series with grouping |
+| **2.4.0** | Charts | 5 chart types |
+| **2.3.0** | Aggregates | sum, avg, min, max, count |
+| **2.2.0** | Include | Relation loading |
+| **2.1.0** | Select | Field selection |
+| **2.0.0** | OrderBy | Sorting |
+| **1.0.0** | WherePipe | Core filtering |
 
 ---
 
-**[Unreleased]** - Future Plans
-- Advanced filtering (OR, NOT conditions)
-- Custom aggregate functions
-- Query caching
-- Performance monitoring
-- GraphQL adapter
+**Documentation:**
+- [AggregatePipe Documentation](./docs/AGGREGATE_PIPE.md)
+- [WherePipe Documentation](./docs/WHERE_PIPE.md)
+- [Timezone Configuration](./docs/TIMEZONE.md)
+- [OrderPipe, SelectPipe, IncludePipe](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md)

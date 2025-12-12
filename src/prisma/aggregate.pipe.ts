@@ -15,7 +15,6 @@ type AggregateFunction = typeof AGGREGATE_FUNCTIONS[number];
  * Get time key with timezone awareness
  */
 function getTimeKeyWithTimezone(date: Date, interval: Pipes.TimeInterval): string {
-	// ✅ Use TimezoneService to convert to local
 	const localDate = TimezoneService.utcToLocal(date);
 
 	switch (interval) {
@@ -204,8 +203,9 @@ function getTimeKey(date: Date | string, interval: Pipes.TimeInterval): string {
 	}
 }
 
+
 /**
- * Get nested property value
+ * Get nested property value - FIXED untuk array relationships
  */
 function getNestedValue(obj: any, path: string): any {
 	const keys = path.split('.');
@@ -214,16 +214,87 @@ function getNestedValue(obj: any, path: string): any {
 	for (const key of keys) {
 		if (value == null) return null;
 		value = value[key];
+
+		// ✅ NEW: Handle array relationships
+		if (Array.isArray(value)) {
+			// For pivot tables, we need to flatten the array
+			// Example: productionEmployeePerformanceLeaders[].leaderNik
+			return null; // Will be handled specially in manual aggregation
+		}
 	}
 
 	return value;
 }
 
+/**
+ * ✅ NEW: Detect if a field path is an array relationship
+ */
+function isArrayRelationship(path: string, prismaModel: any): boolean {
+	// Check if this is a known array relationship pattern
+	// This would need to be enhanced based on your schema
+	const arrayRelationPatterns = [
+		'productionEmployeePerformanceLeaders',
+		'productionEmployeePerformanceMachine',
+		// Add other array relationships here
+	];
+
+	return arrayRelationPatterns.some(pattern => path.includes(pattern));
+}
+
+/**
+ * ✅ NEW: Flatten array relationships for grouping
+ * Converts: { productionEmployeePerformanceLeaders: [{ leaderNik: 'A' }, { leaderNik: 'B' }] }
+ * Into multiple records, one per leader
+ */
+function flattenArrayRelationships(
+	data: any[],
+	groupByFields: string[]
+): any[] {
+	const arrayFields = groupByFields.filter(field => field.includes('.'));
+
+	if (arrayFields.length === 0) {
+		return data;
+	}
+
+	const flattened: any[] = [];
+
+	for (const item of data) {
+		// Find which groupBy field is an array relationship
+		const arrayRelationField = arrayFields.find(field => {
+			const relationName = field.split('.')[0];
+			const value = item[relationName];
+			return Array.isArray(value);
+		});
+
+		if (arrayRelationField) {
+			const relationName = arrayRelationField.split('.')[0];
+			const arrayValue = item[relationName];
+
+			if (Array.isArray(arrayValue) && arrayValue.length > 0) {
+				// Create one record per array item
+				for (const arrayItem of arrayValue) {
+					const flattenedItem = { ...item };
+					// Replace array with single item
+					flattenedItem[relationName] = arrayItem;
+					flattened.push(flattenedItem);
+				}
+			} else {
+				// No array items, skip or keep as null
+				const flattenedItem = { ...item };
+				flattenedItem[relationName] = null;
+				flattened.push(flattenedItem);
+			}
+		} else {
+			flattened.push(item);
+		}
+	}
+
+	return flattened;
+}
 
 
 /**
- * Perform manual aggregation with relationships
- * This is the solution for Prisma's limitation with groupBy + relations
+ * Enhanced manual aggregate with array relationship support
  */
 async function manualAggregateWithRelationships(
 	prismaModel: any,
@@ -235,7 +306,6 @@ async function manualAggregateWithRelationships(
 	const scalarSelect = buildSelectForFields(groupBy, aggregates);
 	const relationInclude = buildIncludeForRelationships(groupBy, aggregates);
 
-	// Merge select and include
 	const queryOptions: any = { where };
 
 	if (Object.keys(scalarSelect).length > 0) {
@@ -244,7 +314,6 @@ async function manualAggregateWithRelationships(
 
 	if (Object.keys(relationInclude).length > 0) {
 		if (queryOptions.select) {
-			// If we have select, we need to merge include into it
 			Object.keys(relationInclude).forEach(key => {
 				queryOptions.select[key] = relationInclude[key];
 			});
@@ -256,10 +325,13 @@ async function manualAggregateWithRelationships(
 	// Fetch data with optimized query
 	const allData = await prismaModel.findMany(queryOptions);
 
+	// ✅ NEW: Flatten array relationships before grouping
+	const flattenedData = flattenArrayRelationships(allData, groupBy);
+
 	// Step 2: Group data manually
 	const groups = new Map<string, any[]>();
 
-	for (const item of allData) {
+	for (const item of flattenedData) {
 		// Build group key from groupBy fields
 		const groupKey = groupBy.map(field => {
 			const value = getNestedValue(item, field);
@@ -286,7 +358,6 @@ async function manualAggregateWithRelationships(
 				: { relation: '', field };
 
 			if (relation) {
-				// Store as nested object for consistency
 				if (!result[relation]) {
 					result[relation] = {};
 				}
@@ -297,6 +368,168 @@ async function manualAggregateWithRelationships(
 		});
 
 		// Calculate aggregates
+		for (const agg of aggregates) {
+			const { function: func, field } = agg;
+			const funcKey = `_${func}`;
+
+			if (func === 'count') {
+				result._count = result._count || {};
+				result._count[field] = items.length;
+			} else {
+				result[funcKey] = result[funcKey] || {};
+
+				const values = items
+					.map(item => getNestedValue(item, field))
+					.filter(v => v != null && typeof v === 'number');
+
+				switch (func) {
+					case 'sum':
+						result[funcKey][field] = values.reduce((acc, v) => acc + v, 0);
+						break;
+					case 'avg':
+						result[funcKey][field] = values.length > 0
+							? values.reduce((acc, v) => acc + v, 0) / values.length
+							: 0;
+						break;
+					case 'min':
+						result[funcKey][field] = values.length > 0 ? Math.min(...values) : 0;
+						break;
+					case 'max':
+						result[funcKey][field] = values.length > 0 ? Math.max(...values) : 0;
+						break;
+				}
+			}
+		}
+
+		results.push(result);
+	}
+
+	return results;
+}
+
+
+/**
+ * Enhanced manual aggregate for time series with array relationship support
+ */
+async function manualAggregateForTimeSeries(
+	prismaModel: any,
+	aggregates: Pipes.AggregateSpec[],
+	groupBy: string[],
+	dateField: string,
+	interval: Pipes.TimeInterval,
+	year: number | undefined,
+	where?: any
+): Promise<any[]> {
+	// Step 1: Fetch data
+	const scalarSelect = buildSelectForFields([...groupBy, dateField], aggregates);
+	const relationInclude = buildIncludeForRelationships([...groupBy, dateField], aggregates);
+
+	const queryOptions: any = { where };
+
+	if (Object.keys(scalarSelect).length > 0) {
+		queryOptions.select = { ...scalarSelect };
+	}
+
+	if (Object.keys(relationInclude).length > 0) {
+		if (queryOptions.select) {
+			Object.keys(relationInclude).forEach(key => {
+				queryOptions.select[key] = relationInclude[key];
+			});
+		} else {
+			queryOptions.include = relationInclude;
+		}
+	}
+
+	const allData = await prismaModel.findMany(queryOptions);
+
+	// ✅ Filter by year if specified
+	let filteredData = allData;
+	if (year) {
+		filteredData = allData.filter((item: any) => {
+			const dateValue = getNestedValue(item, dateField);
+			if (!dateValue) return false;
+
+			try {
+				const str = String(dateValue).trim();
+
+				if (/^[A-Za-z]{3}\s\d{4}$/.test(str)) {
+					const yearMatch = str.match(/\d{4}$/);
+					return yearMatch ? parseInt(yearMatch[0], 10) === year : false;
+				}
+
+				if (/^\d{4}$/.test(str)) {
+					return parseInt(str, 10) === year;
+				}
+
+				const date = new Date(dateValue);
+				if (isNaN(date.getTime())) return false;
+				return date.getUTCFullYear() === year;
+			} catch {
+				return false;
+			}
+		});
+	}
+
+	// ✅ NEW: Flatten array relationships
+	const flattenedData = flattenArrayRelationships(filteredData, groupBy);
+
+	// Step 2: Extract year range
+	const yearRange = year
+		? { minYear: year, maxYear: year }
+		: extractYearRangeFromData(flattenedData, dateField, interval);
+
+	// Step 3: Group data
+	const groups = new Map<string, any[]>();
+
+	for (const item of flattenedData) {
+		const dateValue = getNestedValue(item, dateField);
+		if (!dateValue) continue;
+
+		const timeKey = getTimeKeyEnhanced(dateValue, interval, yearRange?.minYear);
+
+		const groupKey = groupBy.length > 0
+			? groupBy.map(field => {
+				const value = getNestedValue(item, field);
+				return String(value ?? 'null');
+			}).join('|||')
+			: 'default';
+
+		const compositeKey = `${groupKey}|||${timeKey}`;
+
+		if (!groups.has(compositeKey)) {
+			groups.set(compositeKey, []);
+		}
+		groups.get(compositeKey)!.push(item);
+	}
+
+	// Step 4: Calculate aggregates
+	const results: any[] = [];
+
+	for (const [compositeKey, items] of groups.entries()) {
+		const result: any = {};
+		const parts = compositeKey.split('|||');
+		const timeKey = parts.pop()!;
+		const groupKeyParts = parts.join('|||').split('|||');
+
+		if (groupBy.length > 0) {
+			groupBy.forEach((field, idx) => {
+				const { relation, field: fieldName } = field.includes('.')
+					? parseRelationshipPath(field)
+					: { relation: '', field };
+
+				if (relation) {
+					if (!result[relation]) {
+						result[relation] = {};
+					}
+					result[relation][fieldName] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+				} else {
+					result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
+				}
+			});
+		}
+
+		result[dateField] = timeKey;
+
 		for (const agg of aggregates) {
 			const { function: func, field } = agg;
 			const funcKey = `_${func}`;
@@ -388,12 +621,9 @@ function extractYearRangeFromData(
 		const str = String(value).trim();
 		let year: number | null = null;
 
-		// Direct year string
 		if (/^\d{4}$/.test(str)) {
 			year = parseInt(str, 10);
-		}
-		// Try parse as date
-		else {
+		} else {
 			try {
 				const date = new Date(str);
 				if (!isNaN(date.getTime())) {
@@ -442,7 +672,6 @@ function generateTimeSeriesLabelsEnhanced(
 
 		case 'month': {
 			const year = specifiedYear || yearRange?.minYear || currentYear;
-			// ✅ FIX: Hanya generate untuk 1 tahun saja
 			for (let i = 0; i < 12; i++) {
 				const date = new Date(Date.UTC(year, i, 1));
 				labels.push(date.toLocaleString('en-US', {
@@ -456,17 +685,14 @@ function generateTimeSeriesLabelsEnhanced(
 
 		case 'year': {
 			if (specifiedYear) {
-				// Generate 5 tahun ke belakang dari tahun yang ditentukan
 				for (let i = 4; i >= 0; i--) {
 					labels.push((specifiedYear - i).toString());
 				}
 			} else if (yearRange) {
-				// ✅ FIX: Generate dari minYear sampai maxYear
 				for (let y = yearRange.minYear; y <= yearRange.maxYear; y++) {
 					labels.push(y.toString());
 				}
 			} else {
-				// Fallback: 5 tahun terakhir
 				for (let i = 4; i >= 0; i--) {
 					labels.push((currentYear - i).toString());
 				}
@@ -477,6 +703,7 @@ function generateTimeSeriesLabelsEnhanced(
 
 	return labels;
 }
+
 /**
  * Parse string value to standardized format based on interval
  */
@@ -493,7 +720,6 @@ function parseStringToTimeKey(
 
 	switch (interval) {
 		case 'year': {
-			// Expected: "2024" or Date
 			if (/^\d{4}$/.test(str)) {
 				return str;
 			}
@@ -505,15 +731,11 @@ function parseStringToTimeKey(
 		}
 
 		case 'month': {
-			// Expected: "01", "1", "January", "Jan", or Date
 			let month: number | null = null;
 
-			// Numeric month
 			if (/^\d{1,2}$/.test(str)) {
 				month = parseInt(str, 10);
-			}
-			// Text month
-			else {
+			} else {
 				const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
 					'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 				const monthIndex = monthNames.findIndex(m =>
@@ -524,7 +746,6 @@ function parseStringToTimeKey(
 				}
 			}
 
-			// Try as full date
 			if (month === null) {
 				const date = new Date(str);
 				if (!isNaN(date.getTime())) {
@@ -544,10 +765,6 @@ function parseStringToTimeKey(
 			return null;
 		}
 		case 'day': {
-			// Expected: "15", "2024-01-15", or Date
-			// For day interval, we need full date context
-
-			// Try as full date first
 			const date = new Date(str);
 			if (!isNaN(date.getTime())) {
 				const year = date.getUTCFullYear();
@@ -556,7 +773,6 @@ function parseStringToTimeKey(
 				return `${year}-${month}-${day}`;
 			}
 
-			// If just day number, need context
 			if (/^\d{1,2}$/.test(str)) {
 				const day = parseInt(str, 10);
 				if (day >= 1 && day <= 31 && contextMonth) {
@@ -588,7 +804,6 @@ function getTimeKeyEnhanced(
 	if (result) return result;
 
 	try {
-		// ✅ Use TimezoneService
 		const dateString = TimezoneService.addTimezoneToDateString(String(value));
 		const date = new Date(dateString);
 		if (!isNaN(date.getTime())) {
@@ -831,181 +1046,6 @@ function transformToChartSeries(
 	};
 }
 
-/**
- * FIXED: Manual aggregation untuk TIME SERIES dengan year filtering
- */
-async function manualAggregateForTimeSeries(
-	prismaModel: any,
-	aggregates: Pipes.AggregateSpec[],
-	groupBy: string[],
-	dateField: string,
-	interval: Pipes.TimeInterval,
-	year: number | undefined,
-	where?: any
-): Promise<any[]> {
-	// Step 1: Fetch semua data dengan select minimal
-	const scalarSelect = buildSelectForFields([...groupBy, dateField], aggregates);
-	const relationInclude = buildIncludeForRelationships([...groupBy, dateField], aggregates);
-
-	const queryOptions: any = { where };
-
-	if (Object.keys(scalarSelect).length > 0) {
-		queryOptions.select = { ...scalarSelect };
-	}
-
-	if (Object.keys(relationInclude).length > 0) {
-		if (queryOptions.select) {
-			Object.keys(relationInclude).forEach(key => {
-				queryOptions.select[key] = relationInclude[key];
-			});
-		} else {
-			queryOptions.include = relationInclude;
-		}
-	}
-
-	const allData = await prismaModel.findMany(queryOptions);
-
-	// // ✅ DEBUG: Log data sebelum filter
-	// console.log('Total data fetched:', allData.length);
-	// console.log('Year to filter:', year);
-
-	// ✅ FIX: Filter data berdasarkan year jika ditentukan
-	let filteredData = allData;
-	if (year) {
-		filteredData = allData.filter((item: any) => {
-			const dateValue = getNestedValue(item, dateField);
-			if (!dateValue) return false;
-
-			try {
-				// Handle string format "Jan 2025", "2025", atau Date object
-				const str = String(dateValue).trim();
-
-				// Check if it's already in "MMM YYYY" format
-				if (/^[A-Za-z]{3}\s\d{4}$/.test(str)) {
-					const yearMatch = str.match(/\d{4}$/);
-					return yearMatch ? parseInt(yearMatch[0], 10) === year : false;
-				}
-
-				// Check if it's just a year "2025"
-				if (/^\d{4}$/.test(str)) {
-					return parseInt(str, 10) === year;
-				}
-
-				// Try parsing as date
-				const date = new Date(dateValue);
-				if (isNaN(date.getTime())) return false;
-				return date.getUTCFullYear() === year;
-			} catch {
-				return false;
-			}
-		});
-	}
-
-	// ✅ DEBUG: Log data setelah filter
-	// console.log('Filtered data count:', filteredData.length);
-
-	// Step 2: Extract year range untuk generate labels
-	const yearRange = year
-		? { minYear: year, maxYear: year }
-		: extractYearRangeFromData(filteredData, dateField, interval);
-
-	// Step 3: Group data by (groupBy fields + time interval)
-	const groups = new Map<string, any[]>();
-
-	for (const item of filteredData) {
-		const dateValue = getNestedValue(item, dateField);
-		if (!dateValue) continue;
-
-		// Generate time key dari dateValue
-		const timeKey = getTimeKeyEnhanced(dateValue, interval, yearRange?.minYear);
-
-		// Generate group key dari groupBy fields
-		const groupKey = groupBy.length > 0
-			? groupBy.map(field => {
-				const value = getNestedValue(item, field);
-				return String(value ?? 'null');
-			}).join('|||')
-			: 'default';
-
-		// Combine group + time key
-		const compositeKey = `${groupKey}|||${timeKey}`;
-
-		if (!groups.has(compositeKey)) {
-			groups.set(compositeKey, []);
-		}
-		groups.get(compositeKey)!.push(item);
-	}
-
-	// Step 4: Calculate aggregates untuk setiap group
-	const results: any[] = [];
-
-	for (const [compositeKey, items] of groups.entries()) {
-		const result: any = {};
-		const parts = compositeKey.split('|||');
-		const timeKey = parts.pop()!;
-		const groupKeyParts = parts.join('|||').split('|||');
-
-		// Add groupBy fields ke result
-		if (groupBy.length > 0) {
-			groupBy.forEach((field, idx) => {
-				const { relation, field: fieldName } = field.includes('.')
-					? parseRelationshipPath(field)
-					: { relation: '', field };
-
-				if (relation) {
-					if (!result[relation]) {
-						result[relation] = {};
-					}
-					result[relation][fieldName] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
-				} else {
-					result[field] = groupKeyParts[idx] !== 'null' ? groupKeyParts[idx] : null;
-				}
-			});
-		}
-
-		// Add time key ke result
-		result[dateField] = timeKey;
-
-		// Calculate aggregates
-		for (const agg of aggregates) {
-			const { function: func, field } = agg;
-			const funcKey = `_${func}`;
-
-			if (func === 'count') {
-				result._count = result._count || {};
-				result._count[field] = items.length;
-			} else {
-				result[funcKey] = result[funcKey] || {};
-
-				const values = items
-					.map(item => getNestedValue(item, field))
-					.filter(v => v != null && typeof v === 'number');
-
-				switch (func) {
-					case 'sum':
-						result[funcKey][field] = values.reduce((acc, v) => acc + v, 0);
-						break;
-					case 'avg':
-						result[funcKey][field] = values.length > 0
-							? values.reduce((acc, v) => acc + v, 0) / values.length
-							: 0;
-						break;
-					case 'min':
-						result[funcKey][field] = values.length > 0 ? Math.min(...values) : 0;
-						break;
-					case 'max':
-						result[funcKey][field] = values.length > 0 ? Math.max(...values) : 0;
-						break;
-				}
-			}
-		}
-
-		results.push(result);
-	}
-
-	return results;
-}
-
 
 /**
  * Parse relationship path into relation name and field
@@ -1017,6 +1057,7 @@ function parseRelationshipPath(path: string): { relation: string; field: string 
 	return { relation, field };
 }
 
+
 /**
  * Build select object for scalar fields
  */
@@ -1026,14 +1067,12 @@ function buildSelectForFields(
 ): Record<string, any> {
 	const select: Record<string, any> = {};
 
-	// Add scalar fields from allFields
 	for (const field of allFields) {
 		if (!field.includes('.')) {
 			select[field] = true;
 		}
 	}
 
-	// Add scalar fields from aggregates
 	for (const agg of aggregates) {
 		if (!agg.field.includes('.')) {
 			select[agg.field] = true;
@@ -1067,6 +1106,7 @@ function buildIncludeForRelationships(
 
 			if (i === parts.length - 1) {
 				if (!current[part]) {
+					// ✅ Default to include all for array relationships
 					current[part] = { select: {} };
 				}
 				if (typeof current[part] === 'object' && 'select' in current[part]) {
@@ -1086,9 +1126,6 @@ function buildIncludeForRelationships(
 	return include;
 }
 
-// ... (semua fungsi helper time series yang sama)
-// getTimeKey, getTimeKeyEnhanced, extractYearRangeFromData, 
-// generateTimeSeriesLabelsEnhanced, parseStringToTimeKey, dll.
 
 /**
  * Aggregate Pipe - FIXED untuk time series tanpa groupBy datetime

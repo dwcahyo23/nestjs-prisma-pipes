@@ -1,19 +1,16 @@
 # 🛠 @dwcahyo/nestjs-prisma-pipes
 
-**NestJS + Prisma query pipes**  
-Transform query strings into Prisma-ready objects with zero manual parsing.  
-Built for modern APIs with type-safe, timezone-aware, field-to-field comparison support.
+**Transform URL query strings into Prisma queries with zero manual parsing.**
 
-[![npm version](https://badge.fury.io/js/%40dwcahyo%2Fnestjs-prisma-pipes.svg)](https://www.npmjs.com/package/@dwcahyo/nestjs-prisma-pipes)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Built for modern NestJS APIs with type-safe filtering, aggregations, and timezone support.
 
 ---
 
 ## ✨ Features
 
-- 🔍 **WherePipe** - Advanced filtering with field-to-field comparison
-- 📊 **AggregatePipe** - Powerful aggregations with chart support
-- 🔄 **OrderByPipe** - Multi-level sorting with relations
+- 🔍 **WherePipe** - Advanced filtering with 20+ operators
+- 📊 **AggregatePipe** - Aggregations with chart generation
+- 🔄 **OrderByPipe** - Multi-field sorting
 - 📋 **SelectPipe** - Dynamic field selection
 - 🔗 **IncludePipe** - Smart relation loading
 - 🌍 **Timezone Support** - Global timezone configuration
@@ -28,229 +25,82 @@ Built for modern APIs with type-safe, timezone-aware, field-to-field comparison 
 npm install @dwcahyo/nestjs-prisma-pipes
 ```
 
-```bash
-yarn add @dwcahyo/nestjs-prisma-pipes
-```
-
-```bash
-pnpm add @dwcahyo/nestjs-prisma-pipes
-```
-
 ---
 
 ## 🚀 Quick Start
 
-### 1. Configure Timezone (Optional but Recommended)
-
-Configure timezone once at application startup:
-
-```typescript
-// main.ts
-import { NestFactory } from '@nestjs/core';
-import { configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-
-  // Configure timezone for all date operations
-  configurePipesTimezone({
-    offset: '+07:00',
-    name: 'Asia/Jakarta',
-  });
-
-  await app.listen(3000);
-}
-bootstrap();
-```
-
-### 2. Use in Your Controller
+### 1. Basic Setup
 
 ```typescript
 import { Controller, Get, Query } from '@nestjs/common';
-import { 
-  WherePipe, 
-  OrderByPipe, 
-  SelectPipe, 
-  IncludePipe,
-  Pipes 
-} from '@dwcahyo/nestjs-prisma-pipes';
+import { WherePipe, OrderByPipe, Pipes } from '@dwcahyo/nestjs-prisma-pipes';
 
 @Controller('products')
 export class ProductController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) {}
 
   @Get()
   async findAll(
     @Query('filter', WherePipe) where?: Pipes.Where,
     @Query('sort', OrderByPipe) orderBy?: Pipes.Order,
-    @Query('fields', SelectPipe) select?: Pipes.Select,
-    @Query('include', IncludePipe) include?: Pipes.Include,
   ) {
-    return this.prisma.product.findMany({
-      where,
-      orderBy,
-      select,
-      include,
-    });
+    return this.prisma.product.findMany({ where, orderBy });
   }
 }
 ```
 
-### 3. Make Requests
+### 2. Make Requests
 
 ```bash
-# Filter products by price range
+# Filter by price
 GET /products?filter=price:gte+int(100),price:lte+int(500)
 
-# Sort by price descending
+# Sort by price
 GET /products?sort=-price
 
-# Select specific fields
+# Select fields
 GET /products?fields=id,name,price
 
 # Include relations
 GET /products?include=category,reviews
 
-# Combine everything
-GET /products?filter=price:gte+int(100)&sort=-price&fields=id,name,price&include=category
+# Combine filters
+GET /products?filter=category.name:electronics&sort=-price&include=category
 ```
 
 ---
 
-## 📚 Documentation
+## 📖 Core Features
 
-### Core Pipes
-
-| Pipe | Description | Documentation |
-|------|-------------|---------------|
-| **WherePipe** | Advanced filtering with operators, types, and field references | [📖 View Docs](./docs/WHERE_PIPE.md) |
-| **AggregatePipe** | Aggregations, grouping, and chart generation | [📖 View Docs](./docs/AGGREGATE_PIPE.md) |
-| **OrderByPipe** | Multi-level sorting with nested relations | [📖 View Docs](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md) |
-| **SelectPipe** | Dynamic field selection | [📖 View Docs](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md) |
-| **IncludePipe** | Smart relation loading | [📖 View Docs](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md) |
-
-### Features
-
-| Feature | Description | Documentation |
-|---------|-------------|---------------|
-| **Timezone Configuration** | Global timezone support for date operations | [📖 View Docs](./docs/TIMEZONE.md) |
-| **Field References** | Field-to-field comparison in filters | [📖 View Docs](./docs/FIELD_REFERENCE.md) |
-
-### Additional Resources
-
-- [🔧 API Reference](./docs/API.md)
-- [📝 Changelog](./CHANGELOG.md)
-- [🎯 Best Practices](./docs/BEST_PRACTICES.md)
-- [🧪 Testing Guide](./docs/TESTING.md)
-- [💡 Examples](./examples)
-
----
-
-## 🎯 Common Use Cases
-
-### E-Commerce Product Search
-
-```typescript
-@Controller('products')
-export class ProductController {
-  @Get()
-  async search(
-    @Query('filter', WherePipe) where?: Pipes.Where,
-    @Query('sort', OrderByPipe) orderBy?: Pipes.Order,
-    @Query('page') page = 1,
-    @Query('limit') limit = 20,
-  ) {
-    const skip = (page - 1) * limit;
-
-    return this.prisma.product.findMany({
-      where,
-      orderBy,
-      take: limit,
-      skip,
-      include: { category: true },
-    });
-  }
-}
-```
-
-**Request:**
-```bash
-GET /products?filter=price:gte+int(100),category.name:electronics&sort=-createdAt&page=1
-```
-
-### Sales Analytics Dashboard
-
-```typescript
-@Controller('analytics')
-export class AnalyticsController {
-  @Get('revenue')
-  async getRevenue(
-    @Query('filter', WherePipe) where?: Pipes.Where,
-    @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
-  ) {
-    const model = this.prisma.order;
-    const data = await AggregatePipe.execute(model, aggregate, where);
-    return AggregatePipe.toChartSeries(data, aggregate);
-  }
-}
-```
-
-**Request:**
-```bash
-GET /analytics/revenue?aggregate=total:sum(),chart:line(orderDate,month:2025)
-```
-
-### Inventory Management with Field Comparison
-
-```typescript
-@Get('low-stock')
-async getLowStock(@Query('filter', WherePipe) where?: Pipes.Where) {
-  // Convert field references
-  const resolved = convertWhereClause(where, this.prisma, 'product');
-  
-  return this.prisma.product.findMany({
-    where: resolved,
-    orderBy: { qty: 'asc' },
-  });
-}
-```
-
-**Request:**
-```bash
-# Products where quantity is less than minimum stock
-GET /inventory/low-stock?filter=qty:lte+field(minStock)
-```
-
----
-
-## 🔑 Key Features
-
-### 1. Advanced Filtering (WherePipe)
+### 🔍 Filtering (WherePipe)
 
 ```bash
-# Type casting
+# Basic comparison
 ?filter=price:gte+int(100)
 
-# Date ranges (timezone-aware!)
-?filter=createdAt:gte+date(2025-01-01),createdAt:lte+date(2025-12-31)
+# Date filtering (timezone-aware)
+?filter=createdAt:gte+date(2025-01-01)
 
-# Field-to-field comparison
-?filter=qty:lte+field(recQty)
+# Text search
+?filter=name:contains+laptop
+
+# Array operations
+?filter=tags:in+array(electronics,gadgets)
 
 # Nested relations
 ?filter=category.name:electronics,warehouse.region:asia
 
-# Array operations
-?filter=tags:in+array(electronics,gadgets)
+# Field-to-field comparison
+?filter=qty:lte+field(minStock)
 ```
 
-[📖 Read Full WherePipe Documentation](./docs/WHERE_PIPE.md)
+**[📖 Full Documentation](./docs/WHERE_PIPE.md)**
 
-### 2. Powerful Aggregations (AggregatePipe)
+### 📊 Aggregations (AggregatePipe)
 
 ```bash
 # Simple aggregation
-?aggregate=price:sum()
+?aggregate=revenue:sum()
 
 # With grouping
 ?aggregate=revenue:sum(),groupBy:(category)
@@ -258,40 +108,43 @@ GET /inventory/low-stock?filter=qty:lte+field(minStock)
 # Chart generation
 ?aggregate=revenue:sum(),chart:line(orderDate,month:2025)
 
-# Multi-series charts
-?aggregate=revenue:sum(),groupBy:(status),chart:bar(status,stacked)
+# Many-to-many pivot tables
+?aggregate=s:avg(),groupBy:(leaders.leaderNik),chart:radar(leaders.leaderNik)
 ```
 
-[📖 Read Full AggregatePipe Documentation](./docs/AGGREGATE_PIPE.md)
+**[📖 Full Documentation](./docs/AGGREGATE_PIPE.md)**
 
-### 3. Flexible Sorting (OrderByPipe)
+### 🔄 Sorting (OrderByPipe)
 
 ```bash
-# Single field ascending
+# Ascending
 ?sort=price
+
+# Descending
+?sort=-price
 
 # Multiple fields
 ?sort=category,-price,name
 
 # Nested relations
-?sort=category.name,-warehouse.stock
+?sort=category.name,-stock
 ```
 
-[📖 Read Full OrderByPipe Documentation](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md)
+**[📖 Full Documentation](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md)**
 
-### 4. Dynamic Field Selection (SelectPipe)
+### 📋 Field Selection (SelectPipe)
 
 ```bash
-# Select specific fields
+# Select fields
 ?fields=id,name,price
 
 # Nested selection
-?fields=id,name,category.name,category.slug
+?fields=id,name,category.name
 ```
 
-[📖 Read Full SelectPipe Documentation](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md)
+**[📖 Full Documentation](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md)**
 
-### 5. Smart Relation Loading (IncludePipe)
+### 🔗 Include Relations (IncludePipe)
 
 ```bash
 # Single relation
@@ -304,147 +157,154 @@ GET /inventory/low-stock?filter=qty:lte+field(minStock)
 ?include=category,reviews.user
 ```
 
-[📖 Read Full IncludePipe Documentation](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md)
+**[📖 Full Documentation](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md)**
 
 ---
 
-## 🌍 Timezone Support
+## 🌍 Timezone Configuration
 
-Configure once, use everywhere:
+Configure once in `main.ts`:
 
 ```typescript
 import { configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
 
-configurePipesTimezone({
-  offset: '+07:00',
-  name: 'Asia/Jakarta',
-});
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  
+  // Configure global timezone
+  configurePipesTimezone({
+    offset: '+07:00',
+    name: 'Asia/Jakarta',
+  });
+  
+  await app.listen(3000);
+}
 ```
 
 **Benefits:**
 - ✅ Date filters respect your timezone
 - ✅ Time series grouping is accurate
-- ✅ No more timezone confusion
-- ✅ Works globally across all pipes
+- ✅ No manual timezone conversion
 
-[📖 Read Full Timezone Documentation](./docs/TIMEZONE.md)
+**[📖 Full Documentation](./docs/TIMEZONE.md)**
 
 ---
 
 ## 🎯 Field-to-Field Comparison
 
-NEW feature for comparing fields within your data:
+Compare fields within your data:
 
 ```typescript
 import { convertWhereClause } from '@dwcahyo/nestjs-prisma-pipes';
 
-async findAll(where?: Pipes.Where) {
-  // Resolve field references
+@Get('low-stock')
+async getLowStock(@Query('filter', WherePipe) where?: Pipes.Where) {
   const resolved = convertWhereClause(where, this.prisma, 'product');
-  
   return this.prisma.product.findMany({ where: resolved });
 }
 ```
 
-**Use cases:**
-- Products where `qty < minStock`
-- Orders where `shippingCost > productCost`
-- Users where `balance >= creditLimit`
-- Workorders with machine assignment timeline
+```bash
+# Products where quantity is less than minimum stock
+GET /products/low-stock?filter=qty:lte+field(minStock)
+```
 
-[📖 Read Full Field Reference Documentation](./docs/FIELD_REFERENCE.md)
+**[📖 Full Documentation](./docs/FIELD_REFERENCE.md)**
 
 ---
 
-## 🔧 API Reference
+## 📚 Complete Documentation
 
-### Exports
-
-```typescript
-// Pipes
-export {
-  WherePipe,
-  OrderByPipe,
-  SelectPipe,
-  IncludePipe,
-  AggregatePipe,
-}
-
-// Helpers
-export {
-  convertWhereClause,
-  createFieldRefConverter,
-  validateFieldReferences,
-  configurePipesTimezone,
-  getPipesTimezone,
-}
-
-// Types
-export type {
-  Pipes,
-  Where,
-  OrderBy,
-  Select,
-  Include,
-  Aggregate,
-  FieldReference,
-  // ... and more
-}
-```
-
-[📖 View Complete API Reference](./docs/API.md)
+| Topic | Description | Link |
+|-------|-------------|------|
+| **WherePipe** | Filtering with 20+ operators | [📖 Docs](./docs/WHERE_PIPE.md) |
+| **AggregatePipe** | Aggregations & charts | [📖 Docs](./docs/AGGREGATE_PIPE.md) |
+| **OrderBy/Select/Include** | Sorting, selection, relations | [📖 Docs](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md) |
+| **Timezone** | Global timezone config | [📖 Docs](./docs/TIMEZONE.md) |
+| **Field References** | Field-to-field comparison | [📖 Docs](./docs/FIELD_REFERENCE.md) |
+| **API Reference** | Complete API docs | [📖 Docs](./docs/API.md) |
+| **Best Practices** | Tips & patterns | [📖 Docs](./docs/BEST_PRACTICES.md) |
+| **Changelog** | Version history | [📖 Docs](./CHANGELOG.md) |
 
 ---
 
-## 🎓 Examples
+## 💡 Common Use Cases
 
-### Basic CRUD Controller
+### E-Commerce Product Search
 
 ```typescript
-@Controller('users')
-export class UserController {
-  constructor(private prisma: PrismaService) {}
-
-  @Get()
-  async findAll(
-    @Query('filter', WherePipe) where?: Pipes.Where,
-    @Query('sort', OrderByPipe) orderBy?: Pipes.Order,
-  ) {
-    return this.prisma.user.findMany({ where, orderBy });
-  }
-
-  @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.prisma.user.findUnique({ where: { id } });
-  }
+@Get()
+async search(
+  @Query('filter', WherePipe) where?: Pipes.Where,
+  @Query('sort', OrderByPipe) orderBy?: Pipes.Order,
+) {
+  return this.prisma.product.findMany({
+    where,
+    orderBy,
+    include: { category: true },
+  });
 }
 ```
 
-### Service Layer Pattern
+```bash
+GET /products?filter=price:gte+int(100),category.name:electronics&sort=-createdAt
+```
+
+### Analytics Dashboard
 
 ```typescript
-@Injectable()
-export abstract class BaseService<T> {
-  protected abstract modelName: string;
-
-  constructor(protected prisma: PrismaService) {}
-
-  async findMany(where?: Pipes.Where, orderBy?: Pipes.Order) {
-    const resolved = convertWhereClause(where, this.prisma, this.modelName);
-    return this.prisma[this.modelName].findMany({ 
-      where: resolved, 
-      orderBy 
-    });
-  }
-}
-
-@Injectable()
-export class ProductService extends BaseService<Product> {
-  protected modelName = 'product';
+@Get('revenue')
+async getRevenue(
+  @Query('filter', WherePipe) where?: Pipes.Where,
+  @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
+) {
+  const data = await AggregatePipe.execute(this.prisma.order, aggregate, where);
+  return AggregatePipe.toChartSeries(data, aggregate);
 }
 ```
 
-[📖 View More Examples](./examples)
+```bash
+GET /analytics/revenue?aggregate=total:sum(),chart:line(orderDate,month:2025)
+```
+
+### Inventory Management
+
+```typescript
+@Get('low-stock')
+async getLowStock(@Query('filter', WherePipe) where?: Pipes.Where) {
+  const resolved = convertWhereClause(where, this.prisma, 'product');
+  return this.prisma.product.findMany({ where: resolved });
+}
+```
+
+```bash
+GET /inventory/low-stock?filter=qty:lte+field(minStock)
+```
+
+---
+
+## 🔧 TypeScript Support
+
+Full type safety out of the box:
+
+```typescript
+import { Pipes } from '@dwcahyo/nestjs-prisma-pipes';
+
+// Type-safe parameters
+async findAll(
+  where?: Pipes.Where,
+  orderBy?: Pipes.Order,
+  select?: Pipes.Select,
+  include?: Pipes.Include,
+): Promise<Product[]> {
+  return this.prisma.product.findMany({
+    where,
+    orderBy,
+    select,
+    include,
+  });
+}
+```
 
 ---
 
@@ -455,41 +315,46 @@ import { Test } from '@nestjs/testing';
 import { WherePipe } from '@dwcahyo/nestjs-prisma-pipes';
 
 describe('ProductController', () => {
-  let controller: ProductController;
   let wherePipe: WherePipe;
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
-      controllers: [ProductController],
-      providers: [PrismaService, WherePipe],
+      providers: [WherePipe],
     }).compile();
 
-    controller = module.get(ProductController);
     wherePipe = module.get(WherePipe);
   });
 
-  it('should parse filter query', () => {
-    const where = wherePipe.transform('price:gte+int(100)');
-    expect(where).toEqual({ price: { gte: 100 } });
+  it('should parse filter correctly', () => {
+    const result = wherePipe.transform('price:gte+int(100)');
+    expect(result).toEqual({ price: { gte: 100 } });
   });
 });
 ```
 
-[📖 Read Full Testing Guide](./docs/TESTING.md)
+**[📖 Testing Guide](./docs/TESTING.md)**
+
+---
+
+## 📝 Version History
+
+| Version | Feature | Details |
+|---------|---------|---------|
+| **2.4.11** | Many-to-Many | Pivot table aggregation |
+| **2.4.10** | Timezone | Global timezone config |
+| **2.4.6** | Relationships | Nested field grouping |
+| **2.4.0** | Charts | 5 chart types |
+| **2.3.0** | Aggregates | sum, avg, min, max, count |
+| **2.0.0** | Sorting | OrderByPipe |
+| **1.0.0** | Filtering | WherePipe |
+
+**[📖 Full Changelog](./CHANGELOG.md)**
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-[📖 View Contributing Guidelines](./CONTRIBUTING.md)
+Contributions welcome! Please read our [Contributing Guidelines](./CONTRIBUTING.md).
 
 ---
 
@@ -501,20 +366,10 @@ MIT © [dwcahyo](https://github.com/dwcahyo)
 
 ## 🔗 Links
 
-- [GitHub Repository](https://github.com/dwcahyo/nestjs-prisma-pipes)
-- [npm Package](https://www.npmjs.com/package/@dwcahyo/nestjs-prisma-pipes)
-- [Issue Tracker](https://github.com/dwcahyo/nestjs-prisma-pipes/issues)
+- [GitHub](https://github.com/dwcahyo/nestjs-prisma-pipes)
+- [npm](https://www.npmjs.com/package/@dwcahyo/nestjs-prisma-pipes)
+- [Issues](https://github.com/dwcahyo/nestjs-prisma-pipes/issues)
 - [Discussions](https://github.com/dwcahyo/nestjs-prisma-pipes/discussions)
-
----
-
-## 💬 Support
-
-Need help? Have questions?
-
-- 📖 [Documentation](./docs)
-- 💬 [GitHub Discussions](https://github.com/dwcahyo/nestjs-prisma-pipes/discussions)
-- 🐛 [Issue Tracker](https://github.com/dwcahyo/nestjs-prisma-pipes/issues)
 
 ---
 

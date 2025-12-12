@@ -25,6 +25,7 @@ AggregatePipe provides:
 - ✅ 5 aggregate functions (sum, avg, min, max, count)
 - ✅ Multi-field grouping
 - ✅ Relationship aggregation
+- ✅ **Many-to-many pivot table aggregation**
 - ✅ Chart generation (5 chart types)
 - ✅ Time series analysis (day, month, year)
 - ✅ Timezone-aware grouping
@@ -238,6 +239,65 @@ GET /analytics/orders?aggregate=id:count(),groupBy:(customer.city)
 ```
 
 **Important:** Uses manual aggregation internally when relationships are detected.
+
+### Many-to-Many Pivot Table Grouping
+
+AggregatePipe automatically handles many-to-many relationships through pivot tables:
+```bash
+# Average performance by leader (through pivot table)
+GET /analytics/performance?aggregate=s:avg(),p:avg(),pd:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik)
+
+# Performance by machine (many-to-many)
+GET /analytics/performance?aggregate=output:sum(),groupBy:(productionEmployeePerformanceMachine.mcCode)
+
+# With chart visualization
+GET /analytics/performance?aggregate=s:avg(),p:avg(),pd:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:radar(productionEmployeePerformanceLeaders.leaderNik)
+```
+
+**How it works:**
+- Automatically detects array relationships in groupBy
+- Flattens pivot table records for proper aggregation
+- Each pivot record is treated as separate data point
+
+**Example Schema:**
+```prisma
+model ProductionEmployeePerformance {
+  id         String
+  s          Float
+  p          Float
+  pd         Float
+  
+  // Many-to-many through pivot
+  productionEmployeePerformanceLeaders ProductionEmployeePerformanceLeader[]
+}
+
+model ProductionEmployeePerformanceLeader {
+  id            String
+  performanceId String
+  leaderNik     String
+  
+  performance ProductionEmployeePerformance @relation(...)
+  leader      MasterUser @relation(...)
+}
+```
+
+**Result:**
+```typescript
+{
+  categories: ['NIK001', 'NIK002', 'NIK003'],
+  series: [
+    { name: 'avg(s)', data: [45.5, 38.2, 42.1] },
+    { name: 'avg(p)', data: [85.3, 78.9, 82.4] },
+    { name: 'avg(pd)', data: [92.1, 88.5, 90.3] }
+  ],
+  chartType: 'radar'
+}
+```
+
+**Important:** 
+- Uses manual aggregation internally for pivot tables
+- One performance record with 3 leaders = 3 separate data points in aggregation
+- Ideal for analyzing relationships like "performance by leader" or "orders by tag"
 
 ---
 
@@ -592,6 +652,55 @@ GET /customers/analytics?aggregate=lifetimeValue:avg(),groupBy:(tier),chart:bar(
 GET /customers/analytics?aggregate=id:count(),chart:line(createdAt,month:2025)
 ```
 
+### Employee Performance with Many-to-Many
+```typescript
+@Controller('performance')
+export class PerformanceController {
+  constructor(private prisma: PrismaService) {}
+
+  @Get('by-leader')
+  async getPerformanceByLeader(
+    @Query('filter', WherePipe) where?: Pipes.Where,
+    @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
+  ) {
+    const data = await AggregatePipe.execute(
+      this.prisma.productionEmployeePerformance,
+      aggregate,
+      where
+    );
+    return AggregatePipe.toChartSeries(data, aggregate);
+  }
+  
+  @Get('by-machine')
+  async getPerformanceByMachine(
+    @Query('filter', WherePipe) where?: Pipes.Where,
+    @Query('aggregate', AggregatePipe) aggregate?: Pipes.Aggregate,
+  ) {
+    const data = await AggregatePipe.execute(
+      this.prisma.productionEmployeePerformance,
+      aggregate,
+      where
+    );
+    return AggregatePipe.toChartSeries(data, aggregate);
+  }
+}
+```
+
+**Requests:**
+```bash
+# Average scores by leader
+GET /performance/by-leader?aggregate=s:avg(),p:avg(),pd:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:radar(productionEmployeePerformanceLeaders.leaderNik)
+
+# Total output by machine
+GET /performance/by-machine?aggregate=output:sum(),groupBy:(productionEmployeePerformanceMachine.mcCode),chart:bar(productionEmployeePerformanceMachine.mcCode)
+
+# Performance by leader with time series
+GET /performance/by-leader?aggregate=s:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik),chart:line(date,month:2025)
+
+# Filtered by date range
+GET /performance/by-leader?aggregate=s:avg(),p:avg(),groupBy:(productionEmployeePerformanceLeaders.leaderNik)&filter=date:gte+date(2025-01-01),date:lte+date(2025-12-31)
+```
+
 ---
 
 ## API Reference
@@ -791,6 +900,46 @@ Ensure you're using `toChartSeries()` to transform the data:
 const data = await AggregatePipe.execute(model, aggregate, where);
 return AggregatePipe.toChartSeries(data, aggregate); // ✅ Adds chartType
 ```
+
+### Issue 4: Many-to-Many Returns Null Categories
+
+**Problem:**
+```bash
+# Pivot table grouping returns null
+GET /analytics?aggregate=score:avg(),groupBy:(pivotTable.field)
+
+# Result shows null:
+{
+  "categories": ["null"],
+  "series": [{ "name": "avg(score)", "data": [42.5] }]
+}
+```
+
+**Cause:**
+Array relationships in pivot tables were not being flattened properly.
+
+**Solution:**
+This is now automatically handled. Ensure:
+- Your groupBy field path is correct: `pivotTableName.fieldName`
+- The relationship is properly defined in Prisma schema
+- The pivot table has data (not an empty array)
+
+**Verification:**
+```bash
+# Test if data exists
+GET /api/entity?include=pivotTable
+
+# Should return:
+{
+  "id": "1",
+  "pivotTable": [
+    { "id": "p1", "field": "value1" },
+    { "id": "p2", "field": "value2" }
+  ]
+}
+```
+
+**Note:** Each record with N pivot entries will be counted N times in aggregation, which is correct behavior for many-to-many analysis.
 
 ---
 
