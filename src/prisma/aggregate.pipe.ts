@@ -44,11 +44,8 @@ function getTimeKeyWithTimezone(date: Date, interval: Pipes.TimeInterval): strin
 
 
 /**
- * Parse aggregate function with parameters and alias support
- * Supports formats:
- * - sum()
- * - sum():alias(Total Revenue)
- * - avg(price):alias(Average Price)
+ * ✅ FIXED: Parse aggregate function with alias support
+ * Now handles nested relationships correctly
  */
 function parseAggregateFunction(value: string): {
 	function: AggregateFunction;
@@ -57,22 +54,38 @@ function parseAggregateFunction(value: string): {
 } | null {
 	if (!value || typeof value !== 'string') return null;
 
-	// Split by :alias() if exists
-	const aliasSplit = value.split(':alias(');
-	let funcPart = aliasSplit[0].trim();
+	// ✅ FIX: Split by :alias( more carefully
+	// Handle cases where field might contain dots (relationships)
+	const aliasPattern = /:alias\s*\(/i;
+	const aliasIndex = value.search(aliasPattern);
+
+	let funcPart = value.trim();
 	let alias: string | undefined;
 
-	// Extract alias if provided
-	if (aliasSplit.length > 1) {
-		const aliasMatch = aliasSplit[1].match(/^([^)]+)\)/);
-		if (aliasMatch) {
-			alias = aliasMatch[1].trim();
+	if (aliasIndex !== -1) {
+		funcPart = value.substring(0, aliasIndex).trim();
+
+		// Extract alias content between parentheses
+		const aliasStartIndex = value.indexOf('(', aliasIndex);
+		if (aliasStartIndex !== -1) {
+			let parenCount = 1;
+			let aliasEndIndex = aliasStartIndex + 1;
+
+			// Find matching closing parenthesis
+			while (aliasEndIndex < value.length && parenCount > 0) {
+				if (value[aliasEndIndex] === '(') parenCount++;
+				else if (value[aliasEndIndex] === ')') parenCount--;
+				aliasEndIndex++;
+			}
+
+			if (parenCount === 0) {
+				alias = value.substring(aliasStartIndex + 1, aliasEndIndex - 1).trim();
+			}
 		}
 	}
 
 	// Parse function and parameters
 	const match = /^(sum|avg|min|max|count)(?:\(([^)]*)\))?$/i.exec(funcPart);
-
 	if (!match) return null;
 
 	const [, func, paramsStr] = match;
@@ -904,19 +917,22 @@ function getTimeKeyEnhanced(
 }
 
 /**
- * Update transform function to use alias in series name
+ * ✅ UPDATED: Get series name with proper alias handling
  */
-function getSeriesName(agg: AggregateSpec): string {
+function getSeriesName(agg: Pipes.AggregateSpec, groupValue?: string): string {
+	// ✅ Priority 1: Use alias if provided
 	if (agg.alias) {
-		return agg.alias;
+		return groupValue ? `${groupValue} - ${agg.alias}` : agg.alias;
 	}
-	return `${agg.function}(${agg.field})`;
+
+	// ✅ Priority 2: Use default format
+	const defaultName = `${agg.function}(${agg.field})`;
+	return groupValue ? `${groupValue} - ${defaultName}` : defaultName;
 }
 
-// ============================================
-// UPDATED: transformToChartSeries with fixes
-// ============================================
-
+/**
+ * ✅ UPDATED: transformToChartSeries - use getSeriesName consistently
+ */
 function transformToChartSeries(
 	data: any[],
 	aggregates: Pipes.AggregateSpec[],
@@ -928,7 +944,7 @@ function transformToChartSeries(
 	// Empty data handling
 	if (!dataArray || dataArray.length === 0) {
 		const series = aggregates.map(agg => ({
-			name: `${agg.function}(${agg.field})`,
+			name: getSeriesName(agg), // ✅ Use helper
 			data: [0],
 		}));
 
@@ -992,7 +1008,8 @@ function transformToChartSeries(
 			groupedDataMap.forEach((timeMap, groupValue) => {
 				aggregates.forEach((agg: Pipes.AggregateSpec) => {
 					const { function: func, field } = agg;
-					const seriesName = `${groupValue} - ${func}(${field})`;
+					// ✅ Use helper with group value
+					const seriesName = getSeriesName(agg, groupValue);
 
 					const seriesData = timeLabels.map(label => {
 						const items = timeMap.get(label);
@@ -1047,6 +1064,7 @@ function transformToChartSeries(
 
 		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 			const { function: func, field } = agg;
+			// ✅ Use helper
 			const seriesName = getSeriesName(agg);
 
 			const seriesData = timeLabels.map(label => {
@@ -1081,23 +1099,25 @@ function transformToChartSeries(
 		};
 	}
 
+	// GROUPED CHART (non-time-series)
 	if (groupBy && groupBy.length > 0) {
 		const categoryField = chartConfig?.groupField || groupBy[0];
 
 		const categories = dataArray.map(item => {
 			const val = getNestedValue(item, categoryField);
-			// Pass the full field path so extractDisplayValue knows which field to extract
 			return extractDisplayValue(val, categoryField);
 		});
 
-
 		const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 			const { function: func, field } = agg;
-			const seriesName = `${func}(${field})`;
+			// ✅ Use helper
+			const seriesName = getSeriesName(agg);
 
 			const seriesData = dataArray.map(item => {
 				if (func === 'count') {
-					return typeof item._count === 'number' ? item._count : (item._count?.[field] || item._count || 0);
+					return typeof item._count === 'number'
+						? item._count
+						: (item._count?.[field] || item._count || 0);
 				}
 				return item[`_${func}`]?.[field] || 0;
 			});
@@ -1120,11 +1140,14 @@ function transformToChartSeries(
 
 	const series = aggregates.map((agg: Pipes.AggregateSpec) => {
 		const { function: func, field } = agg;
-		const seriesName = `${func}(${field})`;
+		// ✅ Use helper
+		const seriesName = getSeriesName(agg);
 
 		const seriesData = dataArray.map(item => {
 			if (func === 'count') {
-				return typeof item._count === 'number' ? item._count : (item._count?.[field] || item._count || 0);
+				return typeof item._count === 'number'
+					? item._count
+					: (item._count?.[field] || item._count || 0);
 			}
 			return item[`_${func}`]?.[field] || 0;
 		});
@@ -1141,6 +1164,7 @@ function transformToChartSeries(
 		raw: dataArray,
 	};
 }
+
 
 
 /**
@@ -1224,9 +1248,8 @@ function buildIncludeForRelationships(
 
 
 /**
- * Aggregate Pipe
+ * ✅ CRITICAL FIX: Update AggregatePipe transform to properly store alias
  */
-@Injectable()
 export default class AggregatePipe implements PipeTransform {
 	transform(value: string): Pipes.Aggregate | undefined {
 		if (!value || value.trim() === '') return undefined;
@@ -1269,6 +1292,7 @@ export default class AggregatePipe implements PipeTransform {
 					}
 				}
 
+				// ✅ Parse aggregate with alias
 				if (val) {
 					const aggFunc = parseAggregateFunction(val);
 					if (aggFunc) {
@@ -1276,7 +1300,7 @@ export default class AggregatePipe implements PipeTransform {
 							field: key,
 							function: aggFunc.function,
 							params: aggFunc.params,
-							alias: aggFunc.alias,
+							alias: aggFunc.alias, // ✅ Store alias
 						});
 					}
 				}
@@ -1294,11 +1318,11 @@ export default class AggregatePipe implements PipeTransform {
 				return {
 					prismaQuery: null as any,
 					aggregates,
-					groupBy: finalGroupBy, // ✅ groupBy TANPA dateField
+					groupBy: finalGroupBy,
 					isGrouped: true,
 					chartConfig,
 					useManualAggregation: true,
-					isTimeSeries: true, // ✅ Flag baru
+					isTimeSeries: true,
 				};
 			}
 
