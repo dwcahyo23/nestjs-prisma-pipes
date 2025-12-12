@@ -128,8 +128,8 @@ function hasRelationshipInGroupBy(groupBy: string[]): boolean {
 
 
 /**
- * ✅ FIXED: Parse chart configuration
- * Now handles empty parentheses: bar(), pie(), line()
+ * ✅ UPDATED: Parse chart configuration with all chart types
+ * Supports: bar, line, pie, scatter, area, heatmap, radar, funnel, gauge, mixed, donut
  */
 function parseChartConfig(value: string): {
 	type: Pipes.ChartType;
@@ -142,25 +142,39 @@ function parseChartConfig(value: string): {
 } | null {
 	if (!value || typeof value !== 'string') return null;
 
-	const chartTypes: Pipes.ChartType[] = ['bar', 'line', 'pie', 'area', 'donut'];
+	// ✅ Updated: All supported chart types
+	const chartTypes: Pipes.ChartType[] = [
+		'bar',
+		'line',
+		'pie',
+		'scatter',
+		'area',
+		'heatmap',
+		'radar',
+		'funnel',
+		'gauge',
+		'mixed',
+		'donut'
+	];
+
 	const trimmedValue = value.toLowerCase().trim();
 
-	// ✅ FIX 1: Handle chart type without parentheses
-	// Example: chart:bar, chart:pie
+	// Check 1: Handle chart type without parentheses
+	// Example: chart:bar, chart:radar
 	if (chartTypes.includes(trimmedValue as Pipes.ChartType)) {
 		return { type: trimmedValue as Pipes.ChartType };
 	}
 
-	// ✅ FIX 2: Handle chart type with empty parentheses
-	// Example: chart:bar(), chart:pie()
-	const emptyParenMatch = /^(bar|line|pie|area|donut)\(\s*\)$/i.exec(trimmedValue);
+	// Check 2: Handle chart type with empty parentheses
+	// Example: chart:bar(), chart:radar()
+	const emptyParenMatch = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(\s*\)$/i.exec(trimmedValue);
 	if (emptyParenMatch) {
 		return { type: emptyParenMatch[1].toLowerCase() as Pipes.ChartType };
 	}
 
-	// ✅ FIX 3: Parse chart with parameters
+	// Check 3: Parse chart with parameters
 	// Pattern: type(param1) or type(param1, param2) or type(param1, param2:value)
-	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
+	const match = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
 
 	if (!match) return null;
 

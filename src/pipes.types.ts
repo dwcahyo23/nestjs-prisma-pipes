@@ -216,7 +216,7 @@ export namespace Pipes {
 	/**
 	 * Supported chart types
 	 */
-	export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'donut';
+	export type ChartType = 'bar' | 'line' | 'pie' | 'scatter' | 'area' | 'heatmap' | 'radar' | 'funnel' | 'gauge' | 'mixed' | 'donut';
 
 	/**
 	 * Time intervals for time series
