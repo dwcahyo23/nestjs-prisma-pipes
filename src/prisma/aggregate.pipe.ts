@@ -272,6 +272,8 @@ function getTimeKey(date: Date | string, interval: Pipes.TimeInterval): string {
  * Get nested property value
  */
 function getNestedValue(obj: any, path: string): any {
+	if (!path) return obj;
+
 	const keys = path.split('.');
 	let value = obj;
 
@@ -279,7 +281,7 @@ function getNestedValue(obj: any, path: string): any {
 		if (value == null) return null;
 		value = value[key];
 
-		// Handle array relationships
+		// Handle array relationships - return null if we hit an array
 		if (Array.isArray(value)) {
 			return null;
 		}
@@ -301,23 +303,17 @@ function extractDisplayValue(value: any, fieldPath?: string): string {
 		return getTimeKey(value, 'day');
 	}
 
-	// ✅ NAVIGATE FULL PATH
+	// ✅ CRITICAL FIX: Navigate from root object using full fieldPath
 	if (fieldPath && fieldPath.includes('.')) {
-		const pathParts = fieldPath.split('.');
-		let current = value;
+		// fieldPath is the FULL path from root, so we need to navigate from value (which is root)
+		const pathValue = getNestedValue(value, fieldPath);
 
-		for (const part of pathParts) {
-			if (current == null) return 'null';
-			current = current[part];
-			if (Array.isArray(current)) return 'null';
-		}
-
-		if (current !== undefined && current !== null) {
-			if (typeof current !== 'object') {
-				return String(current);
+		if (pathValue !== null && pathValue !== undefined) {
+			if (typeof pathValue !== 'object') {
+				return String(pathValue);
 			}
-			if (current instanceof Date) {
-				return getTimeKey(current, 'day');
+			if (pathValue instanceof Date) {
+				return getTimeKey(pathValue, 'day');
 			}
 		}
 	}

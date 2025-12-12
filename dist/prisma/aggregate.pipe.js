@@ -226,13 +226,15 @@ function getTimeKey(date, interval) {
  * Get nested property value
  */
 function getNestedValue(obj, path) {
+    if (!path)
+        return obj;
     const keys = path.split('.');
     let value = obj;
     for (const key of keys) {
         if (value == null)
             return null;
         value = value[key];
-        // Handle array relationships
+        // Handle array relationships - return null if we hit an array
         if (Array.isArray(value)) {
             return null;
         }
@@ -249,23 +251,16 @@ function extractDisplayValue(value, fieldPath) {
     if (value instanceof Date) {
         return getTimeKey(value, 'day');
     }
-    // ✅ NAVIGATE FULL PATH
+    // ✅ CRITICAL FIX: Navigate from root object using full fieldPath
     if (fieldPath && fieldPath.includes('.')) {
-        const pathParts = fieldPath.split('.');
-        let current = value;
-        for (const part of pathParts) {
-            if (current == null)
-                return 'null';
-            current = current[part];
-            if (Array.isArray(current))
-                return 'null';
-        }
-        if (current !== undefined && current !== null) {
-            if (typeof current !== 'object') {
-                return String(current);
+        // fieldPath is the FULL path from root, so we need to navigate from value (which is root)
+        const pathValue = getNestedValue(value, fieldPath);
+        if (pathValue !== null && pathValue !== undefined) {
+            if (typeof pathValue !== 'object') {
+                return String(pathValue);
             }
-            if (current instanceof Date) {
-                return getTimeKey(current, 'day');
+            if (pathValue instanceof Date) {
+                return getTimeKey(pathValue, 'day');
             }
         }
     }
