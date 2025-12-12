@@ -308,7 +308,12 @@ function extractDisplayValue(value: any, fieldPath?: string): string {
 		// fieldPath is the FULL path from root, so we need to navigate from value (which is root)
 		const pathValue = getNestedValue(value, fieldPath);
 
-		if (pathValue !== null && pathValue !== undefined) {
+		// ✅ Handle null explicitly
+		if (pathValue === null) {
+			return 'null';
+		}
+
+		if (pathValue !== undefined) {
 			if (typeof pathValue !== 'object') {
 				return String(pathValue);
 			}
@@ -335,6 +340,11 @@ function extractDisplayValue(value: any, fieldPath?: string): string {
 
 	if (current !== value && typeof current !== 'object') {
 		return String(current);
+	}
+
+	// ✅ Return 'null' string for null values instead of JSON
+	if (current === null) {
+		return 'null';
 	}
 
 	return JSON.stringify(value);
@@ -1116,7 +1126,7 @@ function transformToChartSeries(
 		const categories = dataArray.map(item => {
 			// ✅ FIXED: Pass full item to extractDisplayValue
 			const displayValue = extractDisplayValue(item, categoryField);
-			console.log(`Extracting category from field "${categoryField}":`, displayValue); // Debug log
+			// console.log(`Extracting category from field "${categoryField}":`, displayValue); // Debug log
 			return displayValue;
 		});
 
