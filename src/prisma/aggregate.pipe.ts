@@ -128,7 +128,8 @@ function hasRelationshipInGroupBy(groupBy: string[]): boolean {
 
 
 /**
- * Parse chart configuration
+ * ✅ FIXED: Parse chart configuration
+ * Now handles empty parentheses: bar(), pie(), line()
  */
 function parseChartConfig(value: string): {
 	type: Pipes.ChartType;
@@ -142,13 +143,24 @@ function parseChartConfig(value: string): {
 	if (!value || typeof value !== 'string') return null;
 
 	const chartTypes: Pipes.ChartType[] = ['bar', 'line', 'pie', 'area', 'donut'];
+	const trimmedValue = value.toLowerCase().trim();
 
-	if (chartTypes.includes(value.toLowerCase() as Pipes.ChartType)) {
-		return { type: value.toLowerCase() as Pipes.ChartType };
+	// ✅ FIX 1: Handle chart type without parentheses
+	// Example: chart:bar, chart:pie
+	if (chartTypes.includes(trimmedValue as Pipes.ChartType)) {
+		return { type: trimmedValue as Pipes.ChartType };
 	}
 
-	// Pattern baru: mendukung interval:year
-	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(value.trim());
+	// ✅ FIX 2: Handle chart type with empty parentheses
+	// Example: chart:bar(), chart:pie()
+	const emptyParenMatch = /^(bar|line|pie|area|donut)\(\s*\)$/i.exec(trimmedValue);
+	if (emptyParenMatch) {
+		return { type: emptyParenMatch[1].toLowerCase() as Pipes.ChartType };
+	}
+
+	// ✅ FIX 3: Parse chart with parameters
+	// Pattern: type(param1) or type(param1, param2) or type(param1, param2:value)
+	const match = /^(bar|line|pie|area|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
 
 	if (!match) return null;
 
@@ -159,6 +171,7 @@ function parseChartConfig(value: string): {
 	const interval = intervalPart?.toLowerCase().trim();
 	const year = yearPart ? parseInt(yearPart, 10) : undefined;
 
+	// Time series chart
 	if (interval && timeIntervals.includes(interval)) {
 		return {
 			type: chartType,
@@ -168,8 +181,10 @@ function parseChartConfig(value: string): {
 		};
 	}
 
+	// Regular chart with groupField
 	const options: any = { type: chartType, groupField: firstParam.trim() };
 
+	// Handle additional options (stacked, horizontal)
 	if (intervalPart) {
 		const option = intervalPart.toLowerCase().trim();
 		if (option === 'stacked') {
