@@ -1,5 +1,6 @@
-import { createHmac } from 'crypto';
-import { BadRequestException } from '@nestjs/common';
+// src/backend/utils/crypto.utils.ts
+
+import * as crypto from 'crypto';
 import { getPipesSecurityConfig } from '../config/security.config';
 
 interface SecurePipePayload {
@@ -8,99 +9,191 @@ interface SecurePipePayload {
 	timestamp: number;
 }
 
-function generateSignature(data: string, secretKey: string): string {
-	return createHmac('sha256', secretKey)
-		.update(data)
-		.digest('base64url');
-}
+// ============================================
+// Base64 URL-Safe Decoding (Backend)
+// ============================================
 
-function verifySignature(data: string, signature: string, secretKey: string): boolean {
-	const expectedSignature = generateSignature(data, secretKey);
-	return signature === expectedSignature;
-}
+/**
+ * Convert base64 URL-safe format back to string
+ * CRITICAL: Must match frontend encoding exactly
+ */
+function fromBase64UrlSafe(base64UrlSafe: string): string {
+	// Restore standard base64
+	let base64 = base64UrlSafe
+		.replace(/-/g, '+')
+		.replace(/_/g, '/');
 
-export function encodePipeQuery(query: string): string {
-	const config = getPipesSecurityConfig();
-
-	if (!config.enabled) {
-		return query;
+	// Add padding if needed
+	while (base64.length % 4) {
+		base64 += '=';
 	}
 
-	const encodedData = Buffer.from(query, 'utf-8').toString('base64url');
+	// Decode base64 to Buffer (Node.js)
+	const buffer = Buffer.from(base64, 'base64');
 
-	const payload: SecurePipePayload = {
-		data: encodedData,
-		signature: generateSignature(encodedData, config.secretKey),
-		timestamp: Date.now(),
-	};
-
-	return Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+	// Decode as UTF-8 string
+	return buffer.toString('utf8');
 }
 
-export function decodePipeQuery(encodedQuery: string, clientIp?: string): string {
+/**
+ * Convert string to base64 URL-safe format (for encoding on backend if needed)
+ */
+function toBase64UrlSafe(str: string): string {
+	// Convert string to Buffer with UTF-8 encoding
+	const buffer = Buffer.from(str, 'utf8');
+
+	// Convert to base64
+	const base64 = buffer.toString('base64');
+
+	// Make URL-safe
+	return base64
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/, '');
+}
+
+// ============================================
+// HMAC Generation/Validation
+// ============================================
+
+function generateHmacSignature(data: string, secretKey: string): string {
+	const hmac = crypto.createHmac('sha256', secretKey);
+	hmac.update(data);
+	return hmac.digest('base64')
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/, '');
+}
+
+function verifyHmacSignature(
+	data: string,
+	signature: string,
+	secretKey: string
+): boolean {
+	const expectedSignature = generateHmacSignature(data, secretKey);
+	return crypto.timingSafeEqual(
+		Buffer.from(signature),
+		Buffer.from(expectedSignature)
+	);
+}
+
+// ============================================
+// IP Validation
+// ============================================
+
+function isIpWhitelisted(clientIp: string | undefined, whitelistedIPs: string[]): boolean {
+	if (!whitelistedIPs || whitelistedIPs.length === 0) {
+		return true; // No whitelist = allow all
+	}
+
+	if (!clientIp) {
+		return false; // No IP provided but whitelist exists
+	}
+
+	return whitelistedIPs.includes(clientIp);
+}
+
+// ============================================
+// Main Decode Function - Fixed
+// ============================================
+
+export function decodePipeQuery(
+	encodedQuery: string,
+	clientIp?: string
+): string {
 	const config = getPipesSecurityConfig();
 
+	// If security is disabled, return as-is
 	if (!config.enabled) {
 		return encodedQuery;
 	}
 
-	// Check IP whitelist
-	if (config.whitelistedIPs && config.whitelistedIPs.length > 0 && clientIp) {
-		const normalizedIp = clientIp === '::1' ? '127.0.0.1' : clientIp;
-		const isWhitelisted = config.whitelistedIPs.some(
-			ip => ip === normalizedIp || ip === clientIp
-		);
-
-		if (isWhitelisted && !isSecureQuery(encodedQuery)) {
-			console.log(`✅ Plaintext allowed for whitelisted IP: ${clientIp}`);
-			return encodedQuery;
-		}
-	}
-
 	try {
-		const payloadJson = Buffer.from(encodedQuery, 'base64url').toString('utf-8');
+		// ✅ CRITICAL FIX: Use proper UTF-8 decoding
+		const payloadJson = fromBase64UrlSafe(encodedQuery);
+
+		// ✅ Debug log
+		console.log('🔓 Decoding payload JSON length:', payloadJson.length);
+
 		const payload: SecurePipePayload = JSON.parse(payloadJson);
 
-		if (!payload.data || !payload.signature || !payload.timestamp) {
-			throw new Error('Invalid payload structure');
+		// Validate timestamp
+		if (config.maxAge) {
+			const age = Date.now() - payload.timestamp;
+			if (age > config.maxAge) {
+				throw new Error(`Query expired (age: ${age}ms, max: ${config.maxAge}ms)`);
+			}
 		}
 
-		if (!verifySignature(payload.data, payload.signature, config.secretKey)) {
-			throw new BadRequestException('Invalid query signature - tampering detected');
+		// Validate IP if whitelist exists
+		if (config.whitelistedIPs && config.whitelistedIPs.length > 0) {
+			if (!isIpWhitelisted(clientIp, config.whitelistedIPs)) {
+				throw new Error(`IP ${clientIp} not whitelisted`);
+			}
 		}
 
-		const maxAge = config.maxAge || 3600000;
-		const age = Date.now() - payload.timestamp;
+		// Verify HMAC signature
+		const isValid = verifyHmacSignature(
+			payload.data,
+			payload.signature,
+			config.secretKey
+		);
 
-		if (age > maxAge) {
-			throw new BadRequestException(`Query expired (age: ${Math.round(age / 1000)}s)`);
+		if (!isValid) {
+			throw new Error('Invalid HMAC signature');
 		}
 
-		if (age < 0) {
-			throw new BadRequestException('Query timestamp is in the future');
-		}
+		// ✅ Decode the actual data
+		const decodedQuery = fromBase64UrlSafe(payload.data);
 
-		return Buffer.from(payload.data, 'base64url').toString('utf-8');
+		// ✅ Debug log
+		console.log('🔓 Decoded query:', decodedQuery);
+
+		return decodedQuery;
 
 	} catch (error) {
-		if (config.allowPlaintext && !isSecureQuery(encodedQuery)) {
-			console.log('⚠️  Using plaintext query (development mode)');
+		// If plaintext is allowed as fallback
+		if (config.allowPlaintext) {
+			console.warn('⚠️ Failed to decode secure query, using plaintext fallback');
+			console.warn('⚠️ Error:', error);
 			return encodedQuery;
 		}
 
-		if (error instanceof BadRequestException) {
-			throw error;
-		}
-
-		throw new BadRequestException('Invalid secure query format');
+		console.error('❌ Failed to decode secure query:', error);
+		throw new Error(`Invalid or expired query: ${error instanceof Error ? error.message : 'Unknown error'}`);
 	}
 }
 
+// ============================================
+// Encode Function (for backend if needed)
+// ============================================
+
+export function encodePipeQuery(
+	query: string,
+	secretKey: string
+): string {
+	const encodedData = toBase64UrlSafe(query);
+	const signature = generateHmacSignature(encodedData, secretKey);
+
+	const payload: SecurePipePayload = {
+		data: encodedData,
+		signature: signature,
+		timestamp: Date.now(),
+	};
+
+	const payloadJson = JSON.stringify(payload);
+	return toBase64UrlSafe(payloadJson);
+}
+
+// ============================================
+// Security Validation
+// ============================================
+
 export function isSecureQuery(query: string): boolean {
 	try {
-		const decoded = Buffer.from(query, 'base64url').toString('utf-8');
-		const payload = JSON.parse(decoded);
-		return 'data' in payload && 'signature' in payload && 'timestamp' in payload;
+		const payloadJson = fromBase64UrlSafe(query);
+		const payload = JSON.parse(payloadJson);
+		return !!(payload.data && payload.signature && payload.timestamp);
 	} catch {
 		return false;
 	}
@@ -108,13 +201,15 @@ export function isSecureQuery(query: string): boolean {
 
 export function buildSecureUrl(
 	baseUrl: string,
-	params: Record<string, string | undefined>
+	params: Record<string, string>,
+	secretKey: string
 ): string {
 	const searchParams = new URLSearchParams();
 
 	for (const [key, value] of Object.entries(params)) {
 		if (value) {
-			searchParams.append(key, encodePipeQuery(value));
+			const encoded = encodePipeQuery(value, secretKey);
+			searchParams.append(key, encoded);
 		}
 	}
 

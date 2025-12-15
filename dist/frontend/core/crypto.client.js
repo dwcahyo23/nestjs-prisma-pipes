@@ -1,6 +1,32 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.encodeClientPipeQuery = encodeClientPipeQuery;
+function toBase64UrlSafe(str) {
+    const utf8Bytes = new TextEncoder().encode(str);
+    let binary = '';
+    utf8Bytes.forEach(byte => {
+        binary += String.fromCharCode(byte);
+    });
+    const base64 = btoa(binary);
+    return base64
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+function fromBase64UrlSafe(base64UrlSafe) {
+    let base64 = base64UrlSafe
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+    while (base64.length % 4) {
+        base64 += '=';
+    }
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+}
 function rightRotate(value, amount) {
     return (value >>> amount) | (value << (32 - amount));
 }
@@ -156,10 +182,9 @@ async function generateHmacSignature(data, secretKey) {
     return await generateHmacPureJS(data, secretKey);
 }
 async function encodeClientPipeQuery(query, secretKey) {
-    const encodedData = btoa(unescape(encodeURIComponent(query)))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
+    const encodedData = toBase64UrlSafe(query);
+    console.log('🔐 Original query:', query);
+    console.log('🔐 Encoded data:', encodedData);
     const signature = await generateHmacSignature(encodedData, secretKey);
     const payload = {
         data: encodedData,
@@ -167,9 +192,8 @@ async function encodeClientPipeQuery(query, secretKey) {
         timestamp: Date.now(),
     };
     const payloadJson = JSON.stringify(payload);
-    return btoa(unescape(encodeURIComponent(payloadJson)))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
+    const finalEncoded = toBase64UrlSafe(payloadJson);
+    console.log('🔐 Final encoded:', finalEncoded);
+    return finalEncoded;
 }
 //# sourceMappingURL=crypto.client.js.map

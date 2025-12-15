@@ -102,25 +102,6 @@ function parseAggregateFunction(value: string): {
 }
 
 /**
- * Parse groupBy configuration
- */
-function parseGroupBy(value: string): string[] | null {
-	if (!value || typeof value !== 'string') return null;
-
-	const trimmed = value.trim();
-
-	// Must be wrapped in parentheses
-	if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) {
-		return null;
-	}
-
-	const fields = trimmed.slice(1, -1);
-	if (!fields.trim()) return null;
-
-	return fields.split(',').map(f => f.trim()).filter(Boolean);
-}
-
-/**
  * Check if any groupBy field contains a relationship (has ".")
  */
 function hasRelationshipInGroupBy(groupBy: string[]): boolean {
@@ -129,11 +110,7 @@ function hasRelationshipInGroupBy(groupBy: string[]): boolean {
 
 
 /**
- * ✅ UPDATED: Parse chart configuration with all chart types
- * Supports: bar, line, pie, scatter, area, heatmap, radar, funnel, gauge, mixed, donut
- */
-/**
- * ✅ FIXED: Parse chart configuration
+ * ✅ FIXED: Parse chart configuration - PRESERVE ALL CASE
  */
 function parseChartConfig(value: string): {
 	type: Pipes.ChartType;
@@ -146,70 +123,93 @@ function parseChartConfig(value: string): {
 } | null {
 	if (!value || typeof value !== 'string') return null;
 
-	// ✅ All 11 chart types
 	const chartTypes: Pipes.ChartType[] = [
-		'bar',
-		'line',
-		'pie',
-		'scatter',
-		'area',
-		'heatmap',
-		'radar',
-		'funnel',
-		'gauge',
-		'mixed',
-		'donut'
+		'bar', 'line', 'pie', 'scatter', 'area', 'heatmap',
+		'radar', 'funnel', 'gauge', 'mixed', 'donut'
 	];
 
-	const trimmedValue = value.toLowerCase().trim();
+	const trimmedValue = value.trim();
 
-	// Check 1: Without parentheses
-	if (chartTypes.includes(trimmedValue as Pipes.ChartType)) {
-		return { type: trimmedValue as Pipes.ChartType };
+	// ✅ Check without parentheses (case-insensitive comparison)
+	const lowerValue = trimmedValue.toLowerCase();
+	if (chartTypes.includes(lowerValue as Pipes.ChartType)) {
+		return { type: lowerValue as Pipes.ChartType };
 	}
 
-	// Check 2: Empty parentheses
+	// ✅ Check empty parentheses
 	const emptyParenMatch = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(\s*\)$/i.exec(trimmedValue);
 	if (emptyParenMatch) {
 		return { type: emptyParenMatch[1].toLowerCase() as Pipes.ChartType };
 	}
 
-	// Check 3: With parameters
+	// ✅ Parse with parameters - case insensitive regex, but preserve captured values
 	const match = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
 
-	if (!match) return null;
+	if (!match) {
+		console.warn('Failed to parse chart config:', value);
+		return null;
+	}
 
-	const [, type, firstParam, intervalPart, yearPart] = match;
-	const chartType = type.toLowerCase() as Pipes.ChartType;
+	const [fullMatch, typeStr, fieldParam, optionParam, yearStr] = match;
+
+	// ✅ Chart type to lowercase (expected behavior)
+	const chartType = typeStr.toLowerCase() as Pipes.ChartType;
+
+	// ✅ Field names PRESERVE original case
+	const fieldName = fieldParam.trim();
+
+	// ✅ Options to lowercase for comparison
+	const optionLower = optionParam?.toLowerCase().trim();
+	const year = yearStr ? parseInt(yearStr, 10) : undefined;
 
 	const timeIntervals = ['day', 'month', 'year'];
-	const interval = intervalPart?.toLowerCase().trim();
-	const year = yearPart ? parseInt(yearPart, 10) : undefined;
 
-	// Time series
-	if (interval && timeIntervals.includes(interval)) {
+	// Check if it's a time series (has interval)
+	if (optionLower && timeIntervals.includes(optionLower)) {
 		return {
 			type: chartType,
-			dateField: firstParam.trim(),
-			interval: interval as Pipes.TimeInterval,
+			dateField: fieldName, // ✅ Original case preserved
+			interval: optionLower as Pipes.TimeInterval,
 			year,
 		};
 	}
 
 	// Regular chart with groupField
-	const options: any = { type: chartType, groupField: firstParam.trim() };
+	const result: any = {
+		type: chartType,
+		groupField: fieldName, // ✅ Original case preserved
+	};
 
-	// Additional options
-	if (intervalPart) {
-		const option = intervalPart.toLowerCase().trim();
-		if (option === 'stacked') {
-			options.stacked = true;
-		} else if (option === 'horizontal') {
-			options.horizontal = true;
-		}
+	// Check for additional options
+	if (optionLower === 'stacked') {
+		result.stacked = true;
+	} else if (optionLower === 'horizontal') {
+		result.horizontal = true;
 	}
 
-	return options;
+	return result;
+}
+
+/**
+ * ✅ FIXED: Parse groupBy - PRESERVE CASE
+ */
+function parseGroupBy(value: string): string[] | null {
+	if (!value || typeof value !== 'string') return null;
+
+	const trimmed = value.trim();
+
+	if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) {
+		return null;
+	}
+
+	const fields = trimmed.slice(1, -1);
+	if (!fields.trim()) return null;
+
+	// ✅ Split and trim, but preserve case
+	return fields
+		.split(',')
+		.map(f => f.trim())
+		.filter(Boolean);
 }
 
 /**

@@ -7,7 +7,62 @@ interface SecurePipePayload {
 }
 
 // ============================================
-// Pure JS SHA-256 Implementation
+// Base64 URL-Safe Encoding/Decoding
+// ============================================
+
+/**
+ * Convert string to base64 URL-safe format
+ * CRITICAL: Must preserve exact string content
+ */
+function toBase64UrlSafe(str: string): string {
+	// ✅ Use UTF-8 encoding to preserve all characters
+	const utf8Bytes = new TextEncoder().encode(str);
+
+	// Convert to base64
+	let binary = '';
+	utf8Bytes.forEach(byte => {
+		binary += String.fromCharCode(byte);
+	});
+
+	const base64 = btoa(binary);
+
+	// Make URL-safe
+	return base64
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/, '');
+}
+
+/**
+ * Convert base64 URL-safe format back to string
+ * CRITICAL: Must restore exact original string
+ */
+function fromBase64UrlSafe(base64UrlSafe: string): string {
+	// Restore standard base64
+	let base64 = base64UrlSafe
+		.replace(/-/g, '+')
+		.replace(/_/g, '/');
+
+	// Add padding if needed
+	while (base64.length % 4) {
+		base64 += '=';
+	}
+
+	// Decode base64
+	const binary = atob(base64);
+
+	// Convert to Uint8Array
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) {
+		bytes[i] = binary.charCodeAt(i);
+	}
+
+	// Decode UTF-8
+	return new TextDecoder().decode(bytes);
+}
+
+// ============================================
+// HMAC Generation
 // ============================================
 
 function rightRotate(value: number, amount: number): number {
@@ -15,7 +70,6 @@ function rightRotate(value: number, amount: number): number {
 }
 
 function sha256(message: string): number[] {
-	// SHA-256 constants
 	const K = [
 		0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
 		0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -27,19 +81,16 @@ function sha256(message: string): number[] {
 		0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 	];
 
-	// Initial hash values
 	let H = [
 		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
 		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
 	];
 
-	// Convert message to bytes
 	const msgBytes: number[] = [];
 	for (let i = 0; i < message.length; i++) {
 		msgBytes.push(message.charCodeAt(i) & 0xff);
 	}
 
-	// Padding
 	const msgLen = msgBytes.length;
 	const bitLen = msgLen * 8;
 	msgBytes.push(0x80);
@@ -48,16 +99,13 @@ function sha256(message: string): number[] {
 		msgBytes.push(0x00);
 	}
 
-	// Append length as 64-bit big-endian
 	for (let i = 7; i >= 0; i--) {
 		msgBytes.push((bitLen >>> (i * 8)) & 0xff);
 	}
 
-	// Process message in 512-bit chunks
 	for (let chunk = 0; chunk < msgBytes.length; chunk += 64) {
 		const W: number[] = new Array(64);
 
-		// Copy chunk into first 16 words
 		for (let i = 0; i < 16; i++) {
 			W[i] = (msgBytes[chunk + i * 4] << 24) |
 				(msgBytes[chunk + i * 4 + 1] << 16) |
@@ -65,17 +113,14 @@ function sha256(message: string): number[] {
 				(msgBytes[chunk + i * 4 + 3]);
 		}
 
-		// Extend the first 16 words into the remaining 48 words
 		for (let i = 16; i < 64; i++) {
 			const s0 = rightRotate(W[i - 15], 7) ^ rightRotate(W[i - 15], 18) ^ (W[i - 15] >>> 3);
 			const s1 = rightRotate(W[i - 2], 17) ^ rightRotate(W[i - 2], 19) ^ (W[i - 2] >>> 10);
 			W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
 		}
 
-		// Initialize working variables
 		let [a, b, c, d, e, f, g, h] = H;
 
-		// Main loop
 		for (let i = 0; i < 64; i++) {
 			const S1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
 			const ch = (e & f) ^ ((~e) & g);
@@ -94,7 +139,6 @@ function sha256(message: string): number[] {
 			a = (temp1 + temp2) | 0;
 		}
 
-		// Add this chunk's hash to result
 		H[0] = (H[0] + a) | 0;
 		H[1] = (H[1] + b) | 0;
 		H[2] = (H[2] + c) | 0;
@@ -109,15 +153,13 @@ function sha256(message: string): number[] {
 }
 
 function hmacSha256(key: string, message: string): number[] {
-	const blockSize = 64; // SHA-256 block size in bytes
+	const blockSize = 64;
 
-	// Convert key to bytes
 	let keyBytes: number[] = [];
 	for (let i = 0; i < key.length; i++) {
 		keyBytes.push(key.charCodeAt(i) & 0xff);
 	}
 
-	// If key is longer than block size, hash it
 	if (keyBytes.length > blockSize) {
 		const hashedKey = sha256(key);
 		keyBytes = [];
@@ -129,12 +171,10 @@ function hmacSha256(key: string, message: string): number[] {
 		}
 	}
 
-	// Pad key to block size
 	while (keyBytes.length < blockSize) {
 		keyBytes.push(0x00);
 	}
 
-	// Create inner and outer padded keys
 	const oKeyPad: number[] = [];
 	const iKeyPad: number[] = [];
 
@@ -143,11 +183,9 @@ function hmacSha256(key: string, message: string): number[] {
 		iKeyPad.push(keyBytes[i] ^ 0x36);
 	}
 
-	// Inner hash
 	const innerMessage = String.fromCharCode(...iKeyPad) + message;
 	const innerHash = sha256(innerMessage);
 
-	// Outer hash
 	const innerHashBytes: number[] = [];
 	for (const word of innerHash) {
 		innerHashBytes.push((word >>> 24) & 0xff);
@@ -180,10 +218,6 @@ function hashToBase64Url(hash: number[]): string {
 		.replace(/=+$/, '');
 }
 
-// ============================================
-// HMAC Generation Functions
-// ============================================
-
 async function generateHmacWebCrypto(data: string, secretKey: string): Promise<string> {
 	const encoder = new TextEncoder();
 	const keyData = encoder.encode(secretKey);
@@ -208,13 +242,11 @@ async function generateHmacWebCrypto(data: string, secretKey: string): Promise<s
 }
 
 async function generateHmacPureJS(data: string, secretKey: string): Promise<string> {
-	// Use pure JS HMAC-SHA256 implementation
 	const hash = hmacSha256(secretKey, data);
 	return hashToBase64Url(hash);
 }
 
 async function generateHmacSignature(data: string, secretKey: string): Promise<string> {
-	// Try Web Crypto API first (HTTPS or modern browsers)
 	if (typeof crypto !== 'undefined' && crypto.subtle) {
 		try {
 			return await generateHmacWebCrypto(data, secretKey);
@@ -223,22 +255,23 @@ async function generateHmacSignature(data: string, secretKey: string): Promise<s
 		}
 	}
 
-	// Fallback to pure JS implementation (works on HTTP)
 	return await generateHmacPureJS(data, secretKey);
 }
 
 // ============================================
-// Main Export
+// Main Export - Fixed Encoding
 // ============================================
 
 export async function encodeClientPipeQuery(
 	query: string,
 	secretKey: string
 ): Promise<string> {
-	const encodedData = btoa(unescape(encodeURIComponent(query)))
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/, '');
+	// ✅ CRITICAL FIX: Use proper UTF-8 encoding
+	const encodedData = toBase64UrlSafe(query);
+
+	// ✅ Debug log (remove in production)
+	console.log('🔐 Original query:', query);
+	console.log('🔐 Encoded data:', encodedData);
 
 	const signature = await generateHmacSignature(encodedData, secretKey);
 
@@ -249,8 +282,12 @@ export async function encodeClientPipeQuery(
 	};
 
 	const payloadJson = JSON.stringify(payload);
-	return btoa(unescape(encodeURIComponent(payloadJson)))
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=+$/, '');
+
+	// ✅ Use same encoding for final payload
+	const finalEncoded = toBase64UrlSafe(payloadJson);
+
+	// ✅ Debug log (remove in production)
+	console.log('🔐 Final encoded:', finalEncoded);
+
+	return finalEncoded;
 }

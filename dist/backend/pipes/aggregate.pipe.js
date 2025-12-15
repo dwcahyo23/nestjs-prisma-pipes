@@ -69,6 +69,56 @@ function parseAggregateFunction(value) {
         alias,
     };
 }
+function hasRelationshipInGroupBy(groupBy) {
+    return groupBy.some(field => field.includes('.'));
+}
+function parseChartConfig(value) {
+    if (!value || typeof value !== 'string')
+        return null;
+    const chartTypes = [
+        'bar', 'line', 'pie', 'scatter', 'area', 'heatmap',
+        'radar', 'funnel', 'gauge', 'mixed', 'donut'
+    ];
+    const trimmedValue = value.trim();
+    const lowerValue = trimmedValue.toLowerCase();
+    if (chartTypes.includes(lowerValue)) {
+        return { type: lowerValue };
+    }
+    const emptyParenMatch = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(\s*\)$/i.exec(trimmedValue);
+    if (emptyParenMatch) {
+        return { type: emptyParenMatch[1].toLowerCase() };
+    }
+    const match = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
+    if (!match) {
+        console.warn('Failed to parse chart config:', value);
+        return null;
+    }
+    const [fullMatch, typeStr, fieldParam, optionParam, yearStr] = match;
+    const chartType = typeStr.toLowerCase();
+    const fieldName = fieldParam.trim();
+    const optionLower = optionParam?.toLowerCase().trim();
+    const year = yearStr ? parseInt(yearStr, 10) : undefined;
+    const timeIntervals = ['day', 'month', 'year'];
+    if (optionLower && timeIntervals.includes(optionLower)) {
+        return {
+            type: chartType,
+            dateField: fieldName,
+            interval: optionLower,
+            year,
+        };
+    }
+    const result = {
+        type: chartType,
+        groupField: fieldName,
+    };
+    if (optionLower === 'stacked') {
+        result.stacked = true;
+    }
+    else if (optionLower === 'horizontal') {
+        result.horizontal = true;
+    }
+    return result;
+}
 function parseGroupBy(value) {
     if (!value || typeof value !== 'string')
         return null;
@@ -79,62 +129,10 @@ function parseGroupBy(value) {
     const fields = trimmed.slice(1, -1);
     if (!fields.trim())
         return null;
-    return fields.split(',').map(f => f.trim()).filter(Boolean);
-}
-function hasRelationshipInGroupBy(groupBy) {
-    return groupBy.some(field => field.includes('.'));
-}
-function parseChartConfig(value) {
-    if (!value || typeof value !== 'string')
-        return null;
-    const chartTypes = [
-        'bar',
-        'line',
-        'pie',
-        'scatter',
-        'area',
-        'heatmap',
-        'radar',
-        'funnel',
-        'gauge',
-        'mixed',
-        'donut'
-    ];
-    const trimmedValue = value.toLowerCase().trim();
-    if (chartTypes.includes(trimmedValue)) {
-        return { type: trimmedValue };
-    }
-    const emptyParenMatch = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(\s*\)$/i.exec(trimmedValue);
-    if (emptyParenMatch) {
-        return { type: emptyParenMatch[1].toLowerCase() };
-    }
-    const match = /^(bar|line|pie|scatter|area|heatmap|radar|funnel|gauge|mixed|donut)\(([^,)]+)(?:,\s*([^):]+)(?::(\d+))?)?\)$/i.exec(trimmedValue);
-    if (!match)
-        return null;
-    const [, type, firstParam, intervalPart, yearPart] = match;
-    const chartType = type.toLowerCase();
-    const timeIntervals = ['day', 'month', 'year'];
-    const interval = intervalPart?.toLowerCase().trim();
-    const year = yearPart ? parseInt(yearPart, 10) : undefined;
-    if (interval && timeIntervals.includes(interval)) {
-        return {
-            type: chartType,
-            dateField: firstParam.trim(),
-            interval: interval,
-            year,
-        };
-    }
-    const options = { type: chartType, groupField: firstParam.trim() };
-    if (intervalPart) {
-        const option = intervalPart.toLowerCase().trim();
-        if (option === 'stacked') {
-            options.stacked = true;
-        }
-        else if (option === 'horizontal') {
-            options.horizontal = true;
-        }
-    }
-    return options;
+    return fields
+        .split(',')
+        .map(f => f.trim())
+        .filter(Boolean);
 }
 function generateTimeSeriesLabels(interval, year) {
     const currentYear = year || new Date().getFullYear();
