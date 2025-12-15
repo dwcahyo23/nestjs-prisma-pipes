@@ -8,3 +8,4 @@ export interface PipesSecurityConfig {
 export declare function configurePipesSecurity(config: PipesSecurityConfig): void;
 export declare function getPipesSecurityConfig(): Readonly<PipesSecurityConfig>;
 export declare function resetPipesSecurityConfig(): void;
+//# sourceMappingURL=security.config.d.ts.map

@@ -5,8 +5,8 @@
 		"access": "public"
 	},
 	"description": "NestJS pipes collection for Prisma",
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
+	"main": "./dist/backend/index.js",
+	"types": "./dist/backend/index.d.ts",
 	"files": [
 		"dist",
 		"README.md",
@@ -29,6 +29,19 @@
 			"require": "./dist/frontend/index.js"
 		},
 		"./package.json": "./package.json"
+	},
+	"typesVersions": {
+		"*": {
+			"*": [
+				"./dist/backend/index.d.ts"
+			],
+			"backend": [
+				"./dist/backend/index.d.ts"
+			],
+			"frontend": [
+				"./dist/frontend/index.d.ts"
+			]
+		}
 	},
 	"sideEffects": false,
 	"scripts": {

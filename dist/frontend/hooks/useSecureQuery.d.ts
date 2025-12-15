@@ -9,3 +9,4 @@ interface UseSecureQueryResult<T> {
 }
 export declare function useSecureQuery<T = any>(endpoint: string, params: Record<string, string | undefined>, secretKey: string, options?: UseSecureQueryOptions): UseSecureQueryResult<T>;
 export {};
+//# sourceMappingURL=useSecureQuery.d.ts.map

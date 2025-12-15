@@ -43,3 +43,4 @@ export type Pagination = Pipes.Pagination;
 export type PrismaQuery = Pipes.PrismaQuery;
 export type AggregateQuery = Pipes.AggregateQuery;
 export type TimezoneConfig = Pipes.TimezoneConfig;
+//# sourceMappingURL=index.d.ts.map

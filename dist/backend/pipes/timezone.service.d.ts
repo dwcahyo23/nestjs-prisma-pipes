@@ -13,3 +13,4 @@ declare class TimezoneService {
 }
 declare const _default: TimezoneService;
 export default _default;
+//# sourceMappingURL=timezone.service.d.ts.map

@@ -8,3 +8,4 @@ export default class AggregatePipe implements PipeTransform {
     static toChartSeries(data: any[] | any, aggregateConfig: Pipes.Aggregate): Pipes.ChartSeries;
 }
 export { manualAggregateWithRelationships, manualAggregateForTimeSeries };
+//# sourceMappingURL=aggregate.pipe.d.ts.map

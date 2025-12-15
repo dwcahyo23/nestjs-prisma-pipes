@@ -36,3 +36,4 @@ export interface ExtractedFieldRef {
     context: string;
 }
 export declare function extractAllFieldReferences(whereClause: any, currentModel?: string): ExtractedFieldRef[];
+//# sourceMappingURL=field-ref-converter.helper.d.ts.map
