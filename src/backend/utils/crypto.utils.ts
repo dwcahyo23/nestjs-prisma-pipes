@@ -94,7 +94,40 @@ function isIpWhitelisted(clientIp: string | undefined, whitelistedIPs: string[])
 }
 
 // ============================================
-// Main Decode Function - Fixed
+// Query Type Detection
+// ============================================
+
+/**
+ * Check if a query string is encrypted/encoded or plaintext
+ */
+function isEncryptedQuery(query: string): boolean {
+	// Encrypted queries should be base64url (only alphanumeric, -, _)
+	// and should decode to a JSON with data, signature, timestamp
+	const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+
+	if (!base64UrlPattern.test(query)) {
+		return false; // Contains invalid characters for base64url
+	}
+
+	try {
+		const payloadJson = fromBase64UrlSafe(query);
+		const payload = JSON.parse(payloadJson);
+
+		// Valid encrypted payload must have these fields
+		return !!(
+			payload &&
+			typeof payload === 'object' &&
+			payload.data &&
+			payload.signature &&
+			typeof payload.timestamp === 'number'
+		);
+	} catch {
+		return false;
+	}
+}
+
+// ============================================
+// Main Decode Function - Fixed with Auto-Detection
 // ============================================
 
 export function decodePipeQuery(
@@ -108,13 +141,24 @@ export function decodePipeQuery(
 		return encodedQuery;
 	}
 
+	// ✅ AUTO-DETECT: Check if query is encrypted or plaintext
+	const isEncrypted = isEncryptedQuery(encodedQuery);
+
+	// If plaintext detected
+	if (!isEncrypted) {
+		if (config.allowPlaintext) {
+			console.warn('⚠️ Plaintext query detected (encryption not enabled on client)');
+			return encodedQuery;
+		} else {
+			throw new Error(
+				'Plaintext queries not allowed. Please enable encryption on the client side.'
+			);
+		}
+	}
+
+	// ✅ Encrypted query - proceed with decryption
 	try {
-		// ✅ CRITICAL FIX: Use proper UTF-8 decoding
 		const payloadJson = fromBase64UrlSafe(encodedQuery);
-
-		// ✅ Debug log
-		// console.log('🔓 Decoding payload JSON length:', payloadJson.length);
-
 		const payload: SecurePipePayload = JSON.parse(payloadJson);
 
 		// Validate timestamp
@@ -143,24 +187,23 @@ export function decodePipeQuery(
 			throw new Error('Invalid HMAC signature');
 		}
 
-		// ✅ Decode the actual data
+		// Decode the actual data
 		const decodedQuery = fromBase64UrlSafe(payload.data);
-
-		// ✅ Debug log
-		// console.log('🔓 Decoded query:', decodedQuery);
 
 		return decodedQuery;
 
 	} catch (error) {
-		// If plaintext is allowed as fallback
+		// Only use plaintext fallback if explicitly allowed
 		if (config.allowPlaintext) {
-			console.warn('⚠️ Failed to decode secure query, using plaintext fallback');
+			console.warn('⚠️ Failed to decode encrypted query, using plaintext fallback');
 			console.warn('⚠️ Error:', error);
 			return encodedQuery;
 		}
 
-		console.error('❌ Failed to decode secure query:', error);
-		throw new Error(`Invalid or expired query: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		console.error('❌ Failed to decode encrypted query:', error);
+		throw new Error(
+			`Invalid or expired query: ${error instanceof Error ? error.message : 'Unknown error'}`
+		);
 	}
 }
 
@@ -190,13 +233,7 @@ export function encodePipeQuery(
 // ============================================
 
 export function isSecureQuery(query: string): boolean {
-	try {
-		const payloadJson = fromBase64UrlSafe(query);
-		const payload = JSON.parse(payloadJson);
-		return !!(payload.data && payload.signature && payload.timestamp);
-	} catch {
-		return false;
-	}
+	return isEncryptedQuery(query);
 }
 
 export function buildSecureUrl(

@@ -78,10 +78,38 @@ function isIpWhitelisted(clientIp, whitelistedIPs) {
     }
     return whitelistedIPs.includes(clientIp);
 }
+function isEncryptedQuery(query) {
+    const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+    if (!base64UrlPattern.test(query)) {
+        return false;
+    }
+    try {
+        const payloadJson = fromBase64UrlSafe(query);
+        const payload = JSON.parse(payloadJson);
+        return !!(payload &&
+            typeof payload === 'object' &&
+            payload.data &&
+            payload.signature &&
+            typeof payload.timestamp === 'number');
+    }
+    catch {
+        return false;
+    }
+}
 function decodePipeQuery(encodedQuery, clientIp) {
     const config = (0, security_config_1.getPipesSecurityConfig)();
     if (!config.enabled) {
         return encodedQuery;
+    }
+    const isEncrypted = isEncryptedQuery(encodedQuery);
+    if (!isEncrypted) {
+        if (config.allowPlaintext) {
+            console.warn('⚠️ Plaintext query detected (encryption not enabled on client)');
+            return encodedQuery;
+        }
+        else {
+            throw new Error('Plaintext queries not allowed. Please enable encryption on the client side.');
+        }
     }
     try {
         const payloadJson = fromBase64UrlSafe(encodedQuery);
@@ -106,11 +134,11 @@ function decodePipeQuery(encodedQuery, clientIp) {
     }
     catch (error) {
         if (config.allowPlaintext) {
-            console.warn('⚠️ Failed to decode secure query, using plaintext fallback');
+            console.warn('⚠️ Failed to decode encrypted query, using plaintext fallback');
             console.warn('⚠️ Error:', error);
             return encodedQuery;
         }
-        console.error('❌ Failed to decode secure query:', error);
+        console.error('❌ Failed to decode encrypted query:', error);
         throw new Error(`Invalid or expired query: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 }
@@ -126,14 +154,7 @@ function encodePipeQuery(query, secretKey) {
     return toBase64UrlSafe(payloadJson);
 }
 function isSecureQuery(query) {
-    try {
-        const payloadJson = fromBase64UrlSafe(query);
-        const payload = JSON.parse(payloadJson);
-        return !!(payload.data && payload.signature && payload.timestamp);
-    }
-    catch {
-        return false;
-    }
+    return isEncryptedQuery(query);
 }
 function buildSecureUrl(baseUrl, params, secretKey) {
     const searchParams = new URLSearchParams();
