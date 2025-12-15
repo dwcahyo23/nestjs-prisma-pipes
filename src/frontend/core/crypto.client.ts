@@ -270,8 +270,8 @@ export async function encodeClientPipeQuery(
 	const encodedData = toBase64UrlSafe(query);
 
 	// ✅ Debug log (remove in production)
-	console.log('🔐 Original query:', query);
-	console.log('🔐 Encoded data:', encodedData);
+	// console.log('🔐 Original query:', query);
+	// console.log('🔐 Encoded data:', encodedData);
 
 	const signature = await generateHmacSignature(encodedData, secretKey);
 
@@ -287,7 +287,7 @@ export async function encodeClientPipeQuery(
 	const finalEncoded = toBase64UrlSafe(payloadJson);
 
 	// ✅ Debug log (remove in production)
-	console.log('🔐 Final encoded:', finalEncoded);
+	// console.log('🔐 Final encoded:', finalEncoded);
 
 	return finalEncoded;
 }

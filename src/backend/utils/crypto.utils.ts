@@ -113,7 +113,7 @@ export function decodePipeQuery(
 		const payloadJson = fromBase64UrlSafe(encodedQuery);
 
 		// ✅ Debug log
-		console.log('🔓 Decoding payload JSON length:', payloadJson.length);
+		// console.log('🔓 Decoding payload JSON length:', payloadJson.length);
 
 		const payload: SecurePipePayload = JSON.parse(payloadJson);
 
@@ -147,7 +147,7 @@ export function decodePipeQuery(
 		const decodedQuery = fromBase64UrlSafe(payload.data);
 
 		// ✅ Debug log
-		console.log('🔓 Decoded query:', decodedQuery);
+		// console.log('🔓 Decoded query:', decodedQuery);
 
 		return decodedQuery;
 

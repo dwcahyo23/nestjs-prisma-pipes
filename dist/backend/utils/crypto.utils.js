@@ -85,7 +85,6 @@ function decodePipeQuery(encodedQuery, clientIp) {
     }
     try {
         const payloadJson = fromBase64UrlSafe(encodedQuery);
-        console.log('🔓 Decoding payload JSON length:', payloadJson.length);
         const payload = JSON.parse(payloadJson);
         if (config.maxAge) {
             const age = Date.now() - payload.timestamp;
@@ -103,7 +102,6 @@ function decodePipeQuery(encodedQuery, clientIp) {
             throw new Error('Invalid HMAC signature');
         }
         const decodedQuery = fromBase64UrlSafe(payload.data);
-        console.log('🔓 Decoded query:', decodedQuery);
         return decodedQuery;
     }
     catch (error) {

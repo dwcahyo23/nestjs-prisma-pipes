@@ -183,8 +183,6 @@ async function generateHmacSignature(data, secretKey) {
 }
 async function encodeClientPipeQuery(query, secretKey) {
     const encodedData = toBase64UrlSafe(query);
-    console.log('🔐 Original query:', query);
-    console.log('🔐 Encoded data:', encodedData);
     const signature = await generateHmacSignature(encodedData, secretKey);
     const payload = {
         data: encodedData,
@@ -193,7 +191,6 @@ async function encodeClientPipeQuery(query, secretKey) {
     };
     const payloadJson = JSON.stringify(payload);
     const finalEncoded = toBase64UrlSafe(payloadJson);
-    console.log('🔐 Final encoded:', finalEncoded);
     return finalEncoded;
 }
 //# sourceMappingURL=crypto.client.js.map

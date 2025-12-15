@@ -2,7 +2,7 @@
 
 **Transform URL query strings into Prisma queries with zero manual parsing.**
 
-Built for modern NestJS APIs with type-safe filtering, aggregations, and timezone support.
+Built for modern NestJS APIs with type-safe filtering, aggregations, timezone support, and **secure query encryption**.
 
 ---
 
@@ -14,6 +14,7 @@ Built for modern NestJS APIs with type-safe filtering, aggregations, and timezon
 - 📋 **SelectPipe** - Dynamic field selection
 - 🔗 **IncludePipe** - Smart relation loading
 - 🌍 **Timezone Support** - Global timezone configuration
+- 🔒 **Security** - Query encryption with HMAC signatures (NEW in v2.5.0)
 - 🎯 **Type Safe** - Full TypeScript support
 - 🚀 **Zero Config** - Works out of the box
 
@@ -49,10 +50,37 @@ export class ProductController {
 }
 ```
 
-### 2. Make Requests
+### 2. Configure Security (Optional but Recommended)
+
+```typescript
+// main.ts
+import { configurePipesSecurity, configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  
+  // Configure query encryption (NEW in v2.5.0)
+  configurePipesSecurity({
+    enabled: true,
+    secretKey: process.env.PIPES_SECRET_KEY, // Min 32 characters
+    allowPlaintext: false,
+    maxAge: 3600000, // 1 hour
+  });
+  
+  // Configure timezone
+  configurePipesTimezone({
+    offset: '+07:00',
+    name: 'Asia/Jakarta',
+  });
+  
+  await app.listen(3000);
+}
+```
+
+### 3. Make Requests
 
 ```bash
-# Filter by price
+# Filter by price (queries will be auto-encrypted if security enabled)
 GET /products?filter=price:gte+int(100),price:lte+int(500)
 
 # Sort by price
@@ -71,6 +99,42 @@ GET /products?filter=category.name:electronics&sort=-price&include=category
 ---
 
 ## 📖 Core Features
+
+### 🔒 Query Security (NEW in v2.5.0)
+
+Protect your API queries with HMAC-signed encryption:
+
+```typescript
+// Backend automatically decrypts and validates
+@Get()
+async findAll(
+  @Query('filter', WherePipe) where?: Pipes.Where,
+  @ClientIp() clientIp?: string, // Optional IP validation
+) {
+  return this.prisma.product.findMany({ where });
+}
+```
+
+```typescript
+// Frontend automatically encrypts queries
+import { encodeClientPipeQuery } from '@dwcahyo/nestjs-prisma-pipes/frontend';
+
+const encrypted = await encodeClientPipeQuery(
+  'price:gte+int(100)',
+  process.env.VITE_PIPES_SECRET_KEY
+);
+
+fetch(`/api/products?filter=${encrypted}`);
+```
+
+**Benefits:**
+- ✅ Prevent query tampering
+- ✅ HMAC signature validation
+- ✅ Timestamp-based expiration
+- ✅ Optional IP whitelisting
+- ✅ Works on HTTP and HTTPS
+
+**[📖 Full Security Documentation](./docs/SECURITY.md)**
 
 ### 🔍 Filtering (WherePipe)
 
@@ -217,6 +281,7 @@ GET /products/low-stock?filter=qty:lte+field(minStock)
 
 | Topic | Description | Link |
 |-------|-------------|------|
+| **Security** | Query encryption & HMAC validation | [📖 Docs](./docs/SECURITY.md) |
 | **WherePipe** | Filtering with 20+ operators | [📖 Docs](./docs/WHERE_PIPE.md) |
 | **AggregatePipe** | Aggregations & charts | [📖 Docs](./docs/AGGREGATE_PIPE.md) |
 | **OrderBy/Select/Include** | Sorting, selection, relations | [📖 Docs](./docs/ORDER_BY_SELECT_INCLUDE_PIPE.md) |
@@ -230,13 +295,15 @@ GET /products/low-stock?filter=qty:lte+field(minStock)
 
 ## 💡 Common Use Cases
 
-### E-Commerce Product Search
+### Secure E-Commerce API
 
 ```typescript
+// Backend
 @Get()
 async search(
   @Query('filter', WherePipe) where?: Pipes.Where,
   @Query('sort', OrderByPipe) orderBy?: Pipes.Order,
+  @ClientIp() clientIp?: string,
 ) {
   return this.prisma.product.findMany({
     where,
@@ -246,8 +313,20 @@ async search(
 }
 ```
 
-```bash
-GET /products?filter=price:gte+int(100),category.name:electronics&sort=-createdAt
+```typescript
+// Frontend
+import { buildSecureUrl } from '@dwcahyo/nestjs-prisma-pipes/frontend';
+
+const url = await buildSecureUrl(
+  '/api/products',
+  {
+    filter: 'price:gte+int(100)',
+    sort: '-createdAt',
+  },
+  secretKey
+);
+
+const response = await fetch(url);
 ```
 
 ### Analytics Dashboard
@@ -313,11 +392,19 @@ async findAll(
 ```typescript
 import { Test } from '@nestjs/testing';
 import { WherePipe } from '@dwcahyo/nestjs-prisma-pipes';
+import { configurePipesSecurity } from '@dwcahyo/nestjs-prisma-pipes';
 
 describe('ProductController', () => {
   let wherePipe: WherePipe;
 
   beforeEach(async () => {
+    // Configure security for tests
+    configurePipesSecurity({
+      enabled: true,
+      secretKey: 'test-secret-key-min-32-characters-long',
+      allowPlaintext: false,
+    });
+
     const module = await Test.createTestingModule({
       providers: [WherePipe],
     }).compile();
@@ -340,14 +427,15 @@ describe('ProductController', () => {
 
 | Version | Feature | Details |
 |---------|---------|---------|
-| **2.4.14** | BUG FIX |Fix some bug |
-| **2.4.11** | Many-to-Many | Pivot table aggregation |
-| **2.4.10** | Timezone | Global timezone config |
-| **2.4.6** | Relationships | Nested field grouping |
-| **2.4.0** | Charts | 5 chart types |
-| **2.3.0** | Aggregates | sum, avg, min, max, count |
-| **2.0.0** | Sorting | OrderByPipe |
-| **1.0.0** | Filtering | WherePipe |
+| **2.5.0** | 🔒 Security | Query encryption with HMAC |
+| **2.4.14** | 🐛 Bug Fixes | Time series & nested display |
+| **2.4.11** | 🔗 Many-to-Many | Pivot table aggregation |
+| **2.4.10** | 🌍 Timezone | Global timezone config |
+| **2.4.6** | 📊 Relationships | Nested field grouping |
+| **2.4.0** | 📈 Charts | 5 chart types |
+| **2.3.0** | 🔢 Aggregates | sum, avg, min, max, count |
+| **2.0.0** | 🔄 Sorting | OrderByPipe |
+| **1.0.0** | 🔍 Filtering | WherePipe |
 
 **[📖 Full Changelog](./CHANGELOG.md)**
 
