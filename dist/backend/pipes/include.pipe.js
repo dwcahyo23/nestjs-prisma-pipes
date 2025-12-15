@@ -8,19 +8,28 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.IncludePipe = void 0;
 const common_1 = require("@nestjs/common");
+const crypto_utils_1 = require("../utils/crypto.utils");
 let IncludePipe = class IncludePipe {
-    transform(value) {
+    transform(value, metadata) {
         if (!value)
             return undefined;
-        const strValue = value.trim().replace(/\s+/g, '');
-        if (!strValue)
-            return undefined;
-        const parts = this.splitTopLevel(strValue, ',');
-        const include = {};
-        for (const part of parts) {
-            this.parseIncludePart(include, part);
+        try {
+            const clientIp = metadata?.data?.clientIp;
+            const decodedValue = (0, crypto_utils_1.decodePipeQuery)(value, clientIp);
+            const strValue = decodedValue.trim().replace(/\s+/g, '');
+            if (!strValue)
+                return undefined;
+            const parts = this.splitTopLevel(strValue, ',');
+            const include = {};
+            for (const part of parts) {
+                this.parseIncludePart(include, part);
+            }
+            return include;
         }
-        return include;
+        catch (error) {
+            console.error('Error parsing include:', error);
+            throw new common_1.BadRequestException('Invalid include query parameter');
+        }
     }
     parseIncludePart(obj, part) {
         const selectMatch = part.match(/^(.*?)\.select:\((.*)\)$/);

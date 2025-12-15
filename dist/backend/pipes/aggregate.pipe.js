@@ -8,6 +8,7 @@ exports.manualAggregateForTimeSeries = manualAggregateForTimeSeries;
 const common_1 = require("@nestjs/common");
 const parse_object_literal_1 = __importDefault(require("../helpers/parse-object-literal"));
 const timezone_service_1 = __importDefault(require("./timezone.service"));
+const crypto_utils_1 = require("../utils/crypto.utils");
 const AGGREGATE_FUNCTIONS = ['sum', 'avg', 'min', 'max', 'count'];
 function getTimeKeyWithTimezone(date, interval) {
     const localDate = timezone_service_1.default.utcToLocal(date);
@@ -892,11 +893,13 @@ function buildIncludeForRelationships(allFields, aggregates) {
     return include;
 }
 class AggregatePipe {
-    transform(value) {
+    transform(value, metadata) {
         if (!value || value.trim() === '')
             return undefined;
         try {
-            const parsed = (0, parse_object_literal_1.default)(value);
+            const clientIp = metadata?.data?.clientIp;
+            const decodedValue = (0, crypto_utils_1.decodePipeQuery)(value, clientIp);
+            const parsed = (0, parse_object_literal_1.default)(decodedValue);
             if (!parsed || parsed.length === 0) {
                 throw new common_1.BadRequestException('Invalid aggregate query format');
             }

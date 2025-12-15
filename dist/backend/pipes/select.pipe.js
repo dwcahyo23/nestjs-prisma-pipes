@@ -7,13 +7,16 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const common_1 = require("@nestjs/common");
-let OrderByPipe = class OrderByPipe {
-    transform(value) {
-        if (value == null) {
+const crypto_utils_1 = require("../utils/crypto.utils");
+let SelectPipe = class SelectPipe {
+    transform(value, metadata) {
+        if (value == null || value.trim() === '') {
             return undefined;
         }
         try {
-            const selectFields = value.split(',').map((val) => val.trim());
+            const clientIp = metadata?.data?.clientIp;
+            const decodedValue = (0, crypto_utils_1.decodePipeQuery)(value, clientIp);
+            const selectFields = decodedValue.split(',').map((val) => val.trim());
             const select = {};
             selectFields.forEach((field) => {
                 if (field.startsWith('-')) {
@@ -27,12 +30,12 @@ let OrderByPipe = class OrderByPipe {
         }
         catch (error) {
             console.error(`Error transforming string to Pipes.Select: ${error}`);
-            throw new common_1.BadRequestException('Invalid string format.');
+            throw new common_1.BadRequestException('Invalid select query parameter');
         }
     }
 };
-OrderByPipe = __decorate([
+SelectPipe = __decorate([
     (0, common_1.Injectable)()
-], OrderByPipe);
-exports.default = OrderByPipe;
+], SelectPipe);
+exports.default = SelectPipe;
 //# sourceMappingURL=select.pipe.js.map

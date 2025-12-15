@@ -2,6 +2,7 @@ import { BadRequestException, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
 import TimezoneService from './timezone.service';
 import { Pipes } from '../types/pipes.types';
+import { decodePipeQuery } from '../utils/crypto.utils';
 
 
 
@@ -1262,11 +1263,19 @@ function buildIncludeForRelationships(
  * ✅ CRITICAL FIX: Update AggregatePipe transform to properly store alias
  */
 export default class AggregatePipe implements PipeTransform {
-	transform(value: string): Pipes.Aggregate | undefined {
+	transform(value: string, metadata?: any): Pipes.Aggregate | undefined {
 		if (!value || value.trim() === '') return undefined;
 
+
 		try {
-			const parsed = parseObjectLiteral(value);
+			// ✅ Extract client IP from metadata
+			const clientIp = metadata?.data?.clientIp;
+
+			// ✅ Decode secure query
+			const decodedValue = decodePipeQuery(value, clientIp);
+
+			// ✅ Use decodedValue instead of value
+			const parsed = parseObjectLiteral(decodedValue);
 
 			if (!parsed || parsed.length === 0) {
 				throw new BadRequestException('Invalid aggregate query format');

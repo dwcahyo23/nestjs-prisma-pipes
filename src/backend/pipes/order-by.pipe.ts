@@ -4,16 +4,21 @@ import {
 	PipeTransform,
 } from '@nestjs/common';
 import { Pipes } from '../types/pipes.types';
-
-
+import { decodePipeQuery } from '../utils/crypto.utils';
 
 @Injectable()
 export default class OrderByPipe implements PipeTransform {
-	transform(value: string): Pipes.Order[] | undefined {
+	transform(value: string, metadata?: any): Pipes.Order[] | undefined {
 		if (!value || value.trim() === '') return undefined;
 
 		try {
-			const rules = value
+			// ✅ Extract client IP from metadata
+			const clientIp = metadata?.data?.clientIp;
+
+			// ✅ Decode secure query
+			const decodedValue = decodePipeQuery(value, clientIp);
+
+			const rules = decodedValue
 				.split(',')
 				.map((val) => val.trim())
 				.filter(Boolean);
@@ -58,7 +63,8 @@ export default class OrderByPipe implements PipeTransform {
 			}
 
 			return orderBy;
-		} catch {
+		} catch (error) {
+			console.error('Error parsing orderBy:', error);
 			throw new BadRequestException('Invalid orderBy query parameter');
 		}
 	}

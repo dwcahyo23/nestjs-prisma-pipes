@@ -1,4 +1,5 @@
-import { PipeTransform, Injectable } from '@nestjs/common';
+import { PipeTransform, Injectable, BadRequestException } from '@nestjs/common';
+import { decodePipeQuery } from '../utils/crypto.utils';
 
 export declare namespace IncludePipe {
 	export type Include = Record<string, any>;
@@ -6,21 +7,32 @@ export declare namespace IncludePipe {
 
 @Injectable()
 export class IncludePipe implements PipeTransform {
-	transform(value?: string): IncludePipe.Include | undefined {
+	transform(value?: string, metadata?: any): IncludePipe.Include | undefined {
 		if (!value) return undefined;
 
-		const strValue = value.trim().replace(/\s+/g, '');
-		if (!strValue) return undefined;
+		try {
+			// ✅ Extract client IP from metadata
+			const clientIp = metadata?.data?.clientIp;
 
-		const parts = this.splitTopLevel(strValue, ',');
+			// ✅ Decode secure query
+			const decodedValue = decodePipeQuery(value, clientIp);
 
-		const include: Record<string, any> = {};
+			const strValue = decodedValue.trim().replace(/\s+/g, '');
+			if (!strValue) return undefined;
 
-		for (const part of parts) {
-			this.parseIncludePart(include, part);
+			const parts = this.splitTopLevel(strValue, ',');
+
+			const include: Record<string, any> = {};
+
+			for (const part of parts) {
+				this.parseIncludePart(include, part);
+			}
+
+			return include;
+		} catch (error) {
+			console.error('Error parsing include:', error);
+			throw new BadRequestException('Invalid include query parameter');
 		}
-
-		return include;
 	}
 
 	private parseIncludePart(obj: any, part: string) {

@@ -7,12 +7,15 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const common_1 = require("@nestjs/common");
+const crypto_utils_1 = require("../utils/crypto.utils");
 let OrderByPipe = class OrderByPipe {
-    transform(value) {
+    transform(value, metadata) {
         if (!value || value.trim() === '')
             return undefined;
         try {
-            const rules = value
+            const clientIp = metadata?.data?.clientIp;
+            const decodedValue = (0, crypto_utils_1.decodePipeQuery)(value, clientIp);
+            const rules = decodedValue
                 .split(',')
                 .map((val) => val.trim())
                 .filter(Boolean);
@@ -43,7 +46,8 @@ let OrderByPipe = class OrderByPipe {
             }
             return orderBy;
         }
-        catch {
+        catch (error) {
+            console.error('Error parsing orderBy:', error);
             throw new common_1.BadRequestException('Invalid orderBy query parameter');
         }
     }
