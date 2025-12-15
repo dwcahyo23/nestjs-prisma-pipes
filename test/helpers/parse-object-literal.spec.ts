@@ -1,4 +1,4 @@
-import parseObjectLiteral from '../../src/helpers/parse-object-literal';
+import parseObjectLiteral from '../../src/backend/helpers/parse-object-literal';
 
 describe('parseObjectLiteral', () => {
 	it('should parse a string with one key-value pair', () => {

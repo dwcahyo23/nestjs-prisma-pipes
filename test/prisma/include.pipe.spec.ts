@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { IncludePipe } from '../../src/prisma/include.pipe';
+import { IncludePipe } from '../../src/backend/pipes/include.pipe';
 
 describe('IncludeTransformPipe', () => {
 	let pipe: IncludePipe;

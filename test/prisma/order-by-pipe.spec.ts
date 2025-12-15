@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import OrderByPipe from '../../src/prisma/order-by.pipe';
+import OrderByPipe from '../../src/backend/pipes/order-by.pipe';
 
 describe('OrderByPipe', () => {
 	let pipe: OrderByPipe;

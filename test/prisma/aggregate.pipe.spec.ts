@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import AggregatePipe from '../../src/prisma/aggregate.pipe';
+import AggregatePipe from '../../src/backend/pipes/aggregate.pipe';
 
 describe('AggregatePipe', () => {
 	let pipe: AggregatePipe;

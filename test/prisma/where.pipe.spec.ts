@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import WherePipe from '../../src/prisma/where.pipe';
+import WherePipe from '../../src/backend/pipes/where.pipe';
 
 describe('WherePipe', () => {
 	let pipe: WherePipe;

@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import SelectPipe from '../../src/prisma/select.pipe';
+import SelectPipe from '../../src/backend/pipes/select.pipe';
 
 describe('SelectPipe', () => {
 	let pipe: SelectPipe;
