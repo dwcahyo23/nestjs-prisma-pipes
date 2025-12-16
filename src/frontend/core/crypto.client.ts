@@ -1,4 +1,5 @@
 // src/frontend/core/crypto.client.ts
+// CHANGES: Added HTTP compatibility with Pure JS fallback
 
 interface SecurePipePayload {
 	data: string;
@@ -7,62 +8,50 @@ interface SecurePipePayload {
 }
 
 // ============================================
-// Base64 URL-Safe Encoding/Decoding
+// 🆕 ADD: Environment Detection
+// ============================================
+const IS_SECURE_CONTEXT = typeof window !== 'undefined' && window.isSecureContext;
+const HAS_WEB_CRYPTO = typeof crypto !== 'undefined' && !!crypto.subtle;
+const FORCE_PURE_JS = !IS_SECURE_CONTEXT;
+
+if (FORCE_PURE_JS && typeof window !== 'undefined') {
+	console.warn('⚠️ Running in non-secure context (HTTP), using pure JS crypto implementation');
+}
+
+// ============================================
+// Base64 URL-Safe Encoding/Decoding (UNCHANGED)
 // ============================================
 
-/**
- * Convert string to base64 URL-safe format
- * CRITICAL: Must preserve exact string content
- */
 function toBase64UrlSafe(str: string): string {
-	// ✅ Use UTF-8 encoding to preserve all characters
 	const utf8Bytes = new TextEncoder().encode(str);
-
-	// Convert to base64
 	let binary = '';
 	utf8Bytes.forEach(byte => {
 		binary += String.fromCharCode(byte);
 	});
-
 	const base64 = btoa(binary);
-
-	// Make URL-safe
 	return base64
 		.replace(/\+/g, '-')
 		.replace(/\//g, '_')
 		.replace(/=+$/, '');
 }
 
-/**
- * Convert base64 URL-safe format back to string
- * CRITICAL: Must restore exact original string
- */
 function fromBase64UrlSafe(base64UrlSafe: string): string {
-	// Restore standard base64
 	let base64 = base64UrlSafe
 		.replace(/-/g, '+')
 		.replace(/_/g, '/');
-
-	// Add padding if needed
 	while (base64.length % 4) {
 		base64 += '=';
 	}
-
-	// Decode base64
 	const binary = atob(base64);
-
-	// Convert to Uint8Array
 	const bytes = new Uint8Array(binary.length);
 	for (let i = 0; i < binary.length; i++) {
 		bytes[i] = binary.charCodeAt(i);
 	}
-
-	// Decode UTF-8
 	return new TextDecoder().decode(bytes);
 }
 
 // ============================================
-// HMAC Generation
+// 🆕 ADD: Pure JS HMAC Implementation (for HTTP)
 // ============================================
 
 function rightRotate(value: number, amount: number): number {
@@ -218,6 +207,10 @@ function hashToBase64Url(hash: number[]): string {
 		.replace(/=+$/, '');
 }
 
+// ============================================
+// 🆕 MODIFIED: HMAC Generation with fallback
+// ============================================
+
 async function generateHmacWebCrypto(data: string, secretKey: string): Promise<string> {
 	const encoder = new TextEncoder();
 	const keyData = encoder.encode(secretKey);
@@ -241,38 +234,41 @@ async function generateHmacWebCrypto(data: string, secretKey: string): Promise<s
 	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-async function generateHmacPureJS(data: string, secretKey: string): Promise<string> {
+function generateHmacPureJS(data: string, secretKey: string): string {
 	const hash = hmacSha256(secretKey, data);
 	return hashToBase64Url(hash);
 }
 
+// 🆕 MODIFIED: Auto-detect and use appropriate method
 async function generateHmacSignature(data: string, secretKey: string): Promise<string> {
-	if (typeof crypto !== 'undefined' && crypto.subtle) {
+	// Force pure JS if in non-secure context
+	if (FORCE_PURE_JS) {
+		return generateHmacPureJS(data, secretKey);
+	}
+
+	// Try Web Crypto API first (faster on HTTPS)
+	if (HAS_WEB_CRYPTO) {
 		try {
 			return await generateHmacWebCrypto(data, secretKey);
 		} catch (error) {
-			console.warn('⚠️ Web Crypto API failed, using pure JS implementation');
+			console.warn('⚠️ Web Crypto API failed, falling back to pure JS');
+			return generateHmacPureJS(data, secretKey);
 		}
 	}
 
-	return await generateHmacPureJS(data, secretKey);
+	// Fallback to pure JS
+	return generateHmacPureJS(data, secretKey);
 }
 
 // ============================================
-// Main Export - Fixed Encoding
+// Main Export (UNCHANGED signature)
 // ============================================
 
 export async function encodeClientPipeQuery(
 	query: string,
 	secretKey: string
 ): Promise<string> {
-	// ✅ CRITICAL FIX: Use proper UTF-8 encoding
 	const encodedData = toBase64UrlSafe(query);
-
-	// ✅ Debug log (remove in production)
-	// console.log('🔐 Original query:', query);
-	// console.log('🔐 Encoded data:', encodedData);
-
 	const signature = await generateHmacSignature(encodedData, secretKey);
 
 	const payload: SecurePipePayload = {
@@ -282,12 +278,21 @@ export async function encodeClientPipeQuery(
 	};
 
 	const payloadJson = JSON.stringify(payload);
+	return toBase64UrlSafe(payloadJson);
+}
 
-	// ✅ Use same encoding for final payload
-	const finalEncoded = toBase64UrlSafe(payloadJson);
+// ============================================
+// 🆕 ADD: Utility exports (optional, for debugging)
+// ============================================
 
-	// ✅ Debug log (remove in production)
-	// console.log('🔐 Final encoded:', finalEncoded);
-
-	return finalEncoded;
+export function isCryptoAvailable(): {
+	isSecureContext: boolean;
+	hasWebCrypto: boolean;
+	usingPureJS: boolean;
+} {
+	return {
+		isSecureContext: IS_SECURE_CONTEXT,
+		hasWebCrypto: HAS_WEB_CRYPTO,
+		usingPureJS: FORCE_PURE_JS,
+	};
 }

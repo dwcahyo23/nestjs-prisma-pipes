@@ -1,6 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.encodeClientPipeQuery = encodeClientPipeQuery;
+exports.isCryptoAvailable = isCryptoAvailable;
+const IS_SECURE_CONTEXT = typeof window !== 'undefined' && window.isSecureContext;
+const HAS_WEB_CRYPTO = typeof crypto !== 'undefined' && !!crypto.subtle;
+const FORCE_PURE_JS = !IS_SECURE_CONTEXT;
+if (FORCE_PURE_JS && typeof window !== 'undefined') {
+    console.warn('⚠️ Running in non-secure context (HTTP), using pure JS crypto implementation');
+}
 function toBase64UrlSafe(str) {
     const utf8Bytes = new TextEncoder().encode(str);
     let binary = '';
@@ -166,20 +173,24 @@ async function generateHmacWebCrypto(data, secretKey) {
     }
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-async function generateHmacPureJS(data, secretKey) {
+function generateHmacPureJS(data, secretKey) {
     const hash = hmacSha256(secretKey, data);
     return hashToBase64Url(hash);
 }
 async function generateHmacSignature(data, secretKey) {
-    if (typeof crypto !== 'undefined' && crypto.subtle) {
+    if (FORCE_PURE_JS) {
+        return generateHmacPureJS(data, secretKey);
+    }
+    if (HAS_WEB_CRYPTO) {
         try {
             return await generateHmacWebCrypto(data, secretKey);
         }
         catch (error) {
-            console.warn('⚠️ Web Crypto API failed, using pure JS implementation');
+            console.warn('⚠️ Web Crypto API failed, falling back to pure JS');
+            return generateHmacPureJS(data, secretKey);
         }
     }
-    return await generateHmacPureJS(data, secretKey);
+    return generateHmacPureJS(data, secretKey);
 }
 async function encodeClientPipeQuery(query, secretKey) {
     const encodedData = toBase64UrlSafe(query);
@@ -190,7 +201,13 @@ async function encodeClientPipeQuery(query, secretKey) {
         timestamp: Date.now(),
     };
     const payloadJson = JSON.stringify(payload);
-    const finalEncoded = toBase64UrlSafe(payloadJson);
-    return finalEncoded;
+    return toBase64UrlSafe(payloadJson);
+}
+function isCryptoAvailable() {
+    return {
+        isSecureContext: IS_SECURE_CONTEXT,
+        hasWebCrypto: HAS_WEB_CRYPTO,
+        usingPureJS: FORCE_PURE_JS,
+    };
 }
 //# sourceMappingURL=crypto.client.js.map

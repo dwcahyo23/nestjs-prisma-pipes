@@ -1,5 +1,5 @@
 // Core
-export { encodeClientPipeQuery } from './core/crypto.client';
+export { encodeClientPipeQuery, isCryptoAvailable } from './core/crypto.client';
 
 // Utils
 export { buildSecureUrl, createSecureEncoder } from './utils/url-builder';
