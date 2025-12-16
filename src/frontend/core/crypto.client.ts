@@ -1,5 +1,8 @@
 // src/frontend/core/crypto.client.ts
-// CHANGES: Added HTTP compatibility with Pure JS fallback
+// SOLUTION: Use crypto-js library for HTTP compatibility
+// This ensures 100% compatibility with Node.js crypto
+
+import CryptoJS from 'crypto-js';
 
 interface SecurePipePayload {
 	data: string;
@@ -8,18 +11,18 @@ interface SecurePipePayload {
 }
 
 // ============================================
-// 🆕 ADD: Environment Detection
+// Environment Detection
 // ============================================
 const IS_SECURE_CONTEXT = typeof window !== 'undefined' && window.isSecureContext;
 const HAS_WEB_CRYPTO = typeof crypto !== 'undefined' && !!crypto.subtle;
 const FORCE_PURE_JS = !IS_SECURE_CONTEXT;
 
 if (FORCE_PURE_JS && typeof window !== 'undefined') {
-	console.warn('⚠️ Running in non-secure context (HTTP), using pure JS crypto implementation');
+	console.warn('⚠️ Running in non-secure context (HTTP), using crypto-js library');
 }
 
 // ============================================
-// Base64 URL-Safe Encoding/Decoding (UNCHANGED)
+// Base64 URL-Safe Encoding/Decoding
 // ============================================
 
 function toBase64UrlSafe(str: string): string {
@@ -51,166 +54,31 @@ function fromBase64UrlSafe(base64UrlSafe: string): string {
 }
 
 // ============================================
-// 🆕 ADD: Pure JS HMAC Implementation (for HTTP)
+// HMAC Generation with crypto-js (for HTTP)
 // ============================================
 
-function rightRotate(value: number, amount: number): number {
-	return (value >>> amount) | (value << (32 - amount));
-}
+/**
+ * Generate HMAC using crypto-js library
+ * ✅ 100% compatible with Node.js crypto.createHmac()
+ */
+function generateHmacCryptoJS(data: string, secretKey: string): string {
+	// Generate HMAC-SHA256
+	const hmac = CryptoJS.HmacSHA256(data, secretKey);
 
-function sha256(message: string): number[] {
-	const K = [
-		0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-		0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-		0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-		0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-		0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-		0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-		0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-		0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-	];
+	// Convert to base64
+	const base64 = hmac.toString(CryptoJS.enc.Base64);
 
-	let H = [
-		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-	];
-
-	const msgBytes: number[] = [];
-	for (let i = 0; i < message.length; i++) {
-		msgBytes.push(message.charCodeAt(i) & 0xff);
-	}
-
-	const msgLen = msgBytes.length;
-	const bitLen = msgLen * 8;
-	msgBytes.push(0x80);
-
-	while ((msgBytes.length % 64) !== 56) {
-		msgBytes.push(0x00);
-	}
-
-	for (let i = 7; i >= 0; i--) {
-		msgBytes.push((bitLen >>> (i * 8)) & 0xff);
-	}
-
-	for (let chunk = 0; chunk < msgBytes.length; chunk += 64) {
-		const W: number[] = new Array(64);
-
-		for (let i = 0; i < 16; i++) {
-			W[i] = (msgBytes[chunk + i * 4] << 24) |
-				(msgBytes[chunk + i * 4 + 1] << 16) |
-				(msgBytes[chunk + i * 4 + 2] << 8) |
-				(msgBytes[chunk + i * 4 + 3]);
-		}
-
-		for (let i = 16; i < 64; i++) {
-			const s0 = rightRotate(W[i - 15], 7) ^ rightRotate(W[i - 15], 18) ^ (W[i - 15] >>> 3);
-			const s1 = rightRotate(W[i - 2], 17) ^ rightRotate(W[i - 2], 19) ^ (W[i - 2] >>> 10);
-			W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
-		}
-
-		let [a, b, c, d, e, f, g, h] = H;
-
-		for (let i = 0; i < 64; i++) {
-			const S1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
-			const ch = (e & f) ^ ((~e) & g);
-			const temp1 = (h + S1 + ch + K[i] + W[i]) | 0;
-			const S0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
-			const maj = (a & b) ^ (a & c) ^ (b & c);
-			const temp2 = (S0 + maj) | 0;
-
-			h = g;
-			g = f;
-			f = e;
-			e = (d + temp1) | 0;
-			d = c;
-			c = b;
-			b = a;
-			a = (temp1 + temp2) | 0;
-		}
-
-		H[0] = (H[0] + a) | 0;
-		H[1] = (H[1] + b) | 0;
-		H[2] = (H[2] + c) | 0;
-		H[3] = (H[3] + d) | 0;
-		H[4] = (H[4] + e) | 0;
-		H[5] = (H[5] + f) | 0;
-		H[6] = (H[6] + g) | 0;
-		H[7] = (H[7] + h) | 0;
-	}
-
-	return H;
-}
-
-function hmacSha256(key: string, message: string): number[] {
-	const blockSize = 64;
-
-	let keyBytes: number[] = [];
-	for (let i = 0; i < key.length; i++) {
-		keyBytes.push(key.charCodeAt(i) & 0xff);
-	}
-
-	if (keyBytes.length > blockSize) {
-		const hashedKey = sha256(key);
-		keyBytes = [];
-		for (const word of hashedKey) {
-			keyBytes.push((word >>> 24) & 0xff);
-			keyBytes.push((word >>> 16) & 0xff);
-			keyBytes.push((word >>> 8) & 0xff);
-			keyBytes.push(word & 0xff);
-		}
-	}
-
-	while (keyBytes.length < blockSize) {
-		keyBytes.push(0x00);
-	}
-
-	const oKeyPad: number[] = [];
-	const iKeyPad: number[] = [];
-
-	for (let i = 0; i < blockSize; i++) {
-		oKeyPad.push(keyBytes[i] ^ 0x5c);
-		iKeyPad.push(keyBytes[i] ^ 0x36);
-	}
-
-	const innerMessage = String.fromCharCode(...iKeyPad) + message;
-	const innerHash = sha256(innerMessage);
-
-	const innerHashBytes: number[] = [];
-	for (const word of innerHash) {
-		innerHashBytes.push((word >>> 24) & 0xff);
-		innerHashBytes.push((word >>> 16) & 0xff);
-		innerHashBytes.push((word >>> 8) & 0xff);
-		innerHashBytes.push(word & 0xff);
-	}
-
-	const outerMessage = String.fromCharCode(...oKeyPad) + String.fromCharCode(...innerHashBytes);
-	return sha256(outerMessage);
-}
-
-function hashToBase64Url(hash: number[]): string {
-	const bytes: number[] = [];
-	for (const word of hash) {
-		bytes.push((word >>> 24) & 0xff);
-		bytes.push((word >>> 16) & 0xff);
-		bytes.push((word >>> 8) & 0xff);
-		bytes.push(word & 0xff);
-	}
-
-	let binary = '';
-	for (const byte of bytes) {
-		binary += String.fromCharCode(byte);
-	}
-
-	return btoa(binary)
+	// Convert to base64url (URL-safe)
+	return base64
 		.replace(/\+/g, '-')
 		.replace(/\//g, '_')
 		.replace(/=+$/, '');
 }
 
-// ============================================
-// 🆕 MODIFIED: HMAC Generation with fallback
-// ============================================
-
+/**
+ * Generate HMAC using Web Crypto API (for HTTPS)
+ * ✅ Native browser implementation
+ */
 async function generateHmacWebCrypto(data: string, secretKey: string): Promise<string> {
 	const encoder = new TextEncoder();
 	const keyData = encoder.encode(secretKey);
@@ -226,24 +94,26 @@ async function generateHmacWebCrypto(data: string, secretKey: string): Promise<s
 
 	const signature = await crypto.subtle.sign('HMAC', cryptoKey, dataBuffer);
 
+	// Convert to base64url
 	const bytes = new Uint8Array(signature);
 	let binary = '';
 	for (let i = 0; i < bytes.length; i++) {
 		binary += String.fromCharCode(bytes[i]);
 	}
-	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+	return btoa(binary)
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/, '');
 }
 
-function generateHmacPureJS(data: string, secretKey: string): string {
-	const hash = hmacSha256(secretKey, data);
-	return hashToBase64Url(hash);
-}
-
-// 🆕 MODIFIED: Auto-detect and use appropriate method
+/**
+ * Auto-detect and use appropriate HMAC method
+ */
 async function generateHmacSignature(data: string, secretKey: string): Promise<string> {
-	// Force pure JS if in non-secure context
+	// Use crypto-js if in non-secure context (HTTP)
 	if (FORCE_PURE_JS) {
-		return generateHmacPureJS(data, secretKey);
+		return generateHmacCryptoJS(data, secretKey);
 	}
 
 	// Try Web Crypto API first (faster on HTTPS)
@@ -251,19 +121,23 @@ async function generateHmacSignature(data: string, secretKey: string): Promise<s
 		try {
 			return await generateHmacWebCrypto(data, secretKey);
 		} catch (error) {
-			console.warn('⚠️ Web Crypto API failed, falling back to pure JS');
-			return generateHmacPureJS(data, secretKey);
+			console.warn('⚠️ Web Crypto API failed, falling back to crypto-js');
+			return generateHmacCryptoJS(data, secretKey);
 		}
 	}
 
-	// Fallback to pure JS
-	return generateHmacPureJS(data, secretKey);
+	// Fallback to crypto-js
+	return generateHmacCryptoJS(data, secretKey);
 }
 
 // ============================================
-// Main Export (UNCHANGED signature)
+// Main Export
 // ============================================
 
+/**
+ * Encode query with HMAC signature
+ * Works on both HTTP and HTTPS
+ */
 export async function encodeClientPipeQuery(
 	query: string,
 	secretKey: string
@@ -281,18 +155,106 @@ export async function encodeClientPipeQuery(
 	return toBase64UrlSafe(payloadJson);
 }
 
+/**
+ * Decode query (for local verification)
+ */
+export async function decodeClientPipeQuery(
+	encodedQuery: string,
+	secretKey: string
+): Promise<string> {
+	const payloadJson = fromBase64UrlSafe(encodedQuery);
+	const payload: SecurePipePayload = JSON.parse(payloadJson);
+
+	// Verify signature
+	const expectedSignature = await generateHmacSignature(payload.data, secretKey);
+
+	if (payload.signature !== expectedSignature) {
+		throw new Error('Invalid HMAC signature');
+	}
+
+	return fromBase64UrlSafe(payload.data);
+}
+
 // ============================================
-// 🆕 ADD: Utility exports (optional, for debugging)
+// Utility exports
 // ============================================
 
 export function isCryptoAvailable(): {
 	isSecureContext: boolean;
 	hasWebCrypto: boolean;
-	usingPureJS: boolean;
+	usingCryptoJS: boolean;
+	mode: 'web-crypto' | 'crypto-js' | 'hybrid';
 } {
+	let mode: 'web-crypto' | 'crypto-js' | 'hybrid' = 'hybrid';
+
+	if (FORCE_PURE_JS) {
+		mode = 'crypto-js';
+	} else if (HAS_WEB_CRYPTO) {
+		mode = 'web-crypto';
+	}
+
 	return {
 		isSecureContext: IS_SECURE_CONTEXT,
 		hasWebCrypto: HAS_WEB_CRYPTO,
-		usingPureJS: FORCE_PURE_JS,
+		usingCryptoJS: FORCE_PURE_JS,
+		mode
 	};
+}
+
+/**
+ * Test HMAC compatibility with backend
+ */
+export async function testHmacCompatibility(
+	secretKey: string,
+	testData: string
+): Promise<{
+	data: string;
+	encoded: string;
+	signature: string;
+	mode: string;
+}> {
+	const encoded = toBase64UrlSafe(testData);
+	const signature = await generateHmacSignature(encoded, secretKey);
+	const mode = FORCE_PURE_JS ? 'crypto-js (HTTP)' : 'Web Crypto API (HTTPS)';
+
+	console.log('🧪 Test HMAC Compatibility:');
+	console.log('Input:', testData);
+	console.log('Encoded:', encoded);
+	console.log('Signature:', signature);
+	console.log('Mode:', mode);
+
+	return { data: testData, encoded, signature, mode };
+}
+
+/**
+ * Compare signatures between different methods
+ */
+export async function compareSignatures(
+	data: string,
+	secretKey: string
+): Promise<{
+	cryptoJS: string;
+	webCrypto: string | null;
+	match: boolean;
+}> {
+	const cryptoJSSig = generateHmacCryptoJS(data, secretKey);
+
+	let webCryptoSig: string | null = null;
+	let match = false;
+
+	if (HAS_WEB_CRYPTO) {
+		try {
+			webCryptoSig = await generateHmacWebCrypto(data, secretKey);
+			match = cryptoJSSig === webCryptoSig;
+		} catch (error) {
+			console.warn('Web Crypto API not available');
+		}
+	}
+
+	console.log('🔍 Signature Comparison:');
+	console.log('crypto-js:', cryptoJSSig);
+	console.log('Web Crypto:', webCryptoSig || 'N/A');
+	console.log('Match:', match ? '✅' : '❌');
+
+	return { cryptoJS: cryptoJSSig, webCrypto: webCryptoSig, match };
 }

@@ -1,8 +1,8 @@
 // scripts/test-crypto.ts
 // Run with: ts-node scripts/test-crypto.ts
 
-import { encodePipeQuery, decodePipeQuery } from '../utils/crypto.utils';
-import { configurePipesSecurity } from '../config/security.config';
+import { encodePipeQuery, decodePipeQuery } from '../../src/backend/utils/crypto.utils';
+import { configurePipesSecurity } from '../../src/backend/config/security.config';
 
 // ============================================
 // Test Configuration
