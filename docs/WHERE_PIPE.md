@@ -24,11 +24,12 @@ Transform query strings into Prisma `where` clauses with advanced filtering, typ
 WherePipe transforms URL query strings into Prisma-compatible `where` objects, supporting:
 
 - ✅ 15+ filter operators
-- ✅ 8 type casting functions
+- ✅ 9 type casting functions (including null handling)
 - ✅ Field-to-field comparison
 - ✅ Nested relation filtering
 - ✅ Timezone-aware dates
 - ✅ Multiple conditions with AND/OR logic
+- ✅ NULL and NOT NULL checks
 
 ---
 
@@ -65,6 +66,12 @@ GET /products?filter=name:contains+string(laptop)
 
 # Boolean
 GET /products?filter=active:equals+bool(true)
+
+# NULL check
+GET /products?filter=categoryId:null()
+
+# NOT NULL check
+GET /products?filter=categoryId:not+null()
 ```
 
 ---
@@ -279,6 +286,65 @@ GET /products?filter=tags:hasSome+array(sale,featured)
 }
 ```
 
+### Null - `null()`
+
+Check for NULL and NOT NULL values.
+
+```bash
+# Products without category (NULL)
+GET /products?filter=categoryId:null()
+
+# Products without category (explicit equals)
+GET /products?filter=categoryId:equals+null()
+
+# Products WITH category (NOT NULL)
+GET /products?filter=categoryId:not+null()
+
+# Users without email
+GET /users?filter=email:null()
+
+# Orders with tracking number
+GET /orders?filter=trackingNumber:not+null()
+```
+
+**Prisma output:**
+```typescript
+// categoryId:null()
+{ categoryId: null }
+
+// categoryId:equals+null()
+{ categoryId: { equals: null } }
+
+// categoryId:not+null()
+{ categoryId: { not: null } }
+
+// email:null()
+{ email: null }
+
+// trackingNumber:not+null()
+{ trackingNumber: { not: null } }
+```
+
+**Common use cases:**
+
+| Query | Description | Prisma Output |
+|-------|-------------|---------------|
+| `field:null()` | Field is NULL | `{ field: null }` |
+| `field:equals+null()` | Field is NULL (explicit) | `{ field: { equals: null } }` |
+| `field:not+null()` | Field is NOT NULL | `{ field: { not: null } }` |
+
+**Examples with combinations:**
+```bash
+# Active products without category
+GET /products?filter=active:bool(true),categoryId:null()
+
+# Users with email but no phone
+GET /users?filter=email:not+null(),phone:null()
+
+# Recent orders without tracking
+GET /orders?filter=createdAt:gte+date(2025-12-01),trackingNumber:null()
+```
+
 ### Field Reference - `field()`
 
 Compare with another field in the same table.
@@ -394,6 +460,9 @@ GET /products?filter=category.name:electronics
 
 # Users with premium profile
 GET /users?filter=profile.tier:premium
+
+# Products without category
+GET /products?filter=category.name:null()
 ```
 
 **Prisma output:**
@@ -421,6 +490,9 @@ GET /products?filter=reviews.every.approved:equals+bool(true)
 
 # Products with no pending reviews
 GET /products?filter=reviews.none.status:pending
+
+# Products with at least one review that has no comment
+GET /products?filter=reviews.some.comment:null()
 ```
 
 **Prisma output:**
@@ -452,6 +524,9 @@ GET /products?filter=reviews.some.user.verified:equals+bool(true)
 
 # Orders from warehouses in Asia region
 GET /orders?filter=items.some.product.warehouse.region:asia
+
+# Products with reviews that have no reply
+GET /products?filter=reviews.some.reply:null()
 ```
 
 **Prisma output:**
@@ -487,6 +562,9 @@ Comma-separated conditions are combined with AND:
 ```bash
 # Products that are active AND in electronics category AND price >= 100
 GET /products?filter=active:equals+bool(true),category:electronics,price:gte+int(100)
+
+# Active products with category but no description
+GET /products?filter=active:bool(true),categoryId:not+null(),description:null()
 ```
 
 **Prisma output:**
@@ -520,8 +598,8 @@ GET /products?filter=createdAt:gte+date(2025-11-01),createdAt:lte+date(2025-11-3
 ### Complex Filtering
 
 ```bash
-# Active electronics products priced $100-$500, created in last 30 days
-GET /products?filter=active:equals+bool(true),category:electronics,price:gte+int(100),price:lte+int(500),createdAt:gte+date(2025-11-01)
+# Active electronics products priced $100-$500, created in last 30 days, with tracking
+GET /products?filter=active:equals+bool(true),category:electronics,price:gte+int(100),price:lte+int(500),createdAt:gte+date(2025-11-01),trackingNumber:not+null()
 ```
 
 ---
@@ -559,6 +637,12 @@ GET /products/search?filter=name:contains+string(laptop),reviews.some.rating:gte
 
 # Active products only
 GET /products/search?filter=active:equals+bool(true)
+
+# Products without category
+GET /products/search?filter=categoryId:null()
+
+# Products with description
+GET /products/search?filter=description:not+null()
 ```
 
 ### Inventory Management
@@ -586,6 +670,9 @@ GET /inventory/low-stock?filter=qty:lte+field(minStock)
 
 # Critical stock in specific warehouse
 GET /inventory/low-stock?filter=qty:lt+int(10),warehouse.region:asia
+
+# Products without assigned warehouse
+GET /inventory/low-stock?filter=warehouseId:null()
 ```
 
 ### Order Management
@@ -613,6 +700,39 @@ GET /orders?filter=total:gte+int(1000)
 
 # Orders with specific items
 GET /orders?filter=items.some.productId:equals+string(prod-123)
+
+# Orders without tracking number
+GET /orders?filter=trackingNumber:null()
+
+# Completed orders with tracking
+GET /orders?filter=status:completed,trackingNumber:not+null()
+```
+
+### User Management
+
+```typescript
+@Controller('users')
+export class UserController {
+  @Get('incomplete-profiles')
+  async getIncompleteProfiles(@Query('filter', WherePipe) where?: Pipes.Where) {
+    return this.prisma.user.findMany({
+      where,
+      select: { id: true, email: true, phone: true, address: true },
+    });
+  }
+}
+```
+
+**Requests:**
+```bash
+# Users with email but no phone
+GET /users/incomplete-profiles?filter=email:not+null(),phone:null()
+
+# Users without address
+GET /users/incomplete-profiles?filter=address:null()
+
+# Active users without phone verification
+GET /users/incomplete-profiles?filter=active:bool(true),phoneVerified:null()
 ```
 
 ---
@@ -643,8 +763,8 @@ field: [operator] [type](value)
 **Components:**
 - `field` - Field name (supports dot notation for relations)
 - `operator` - Optional filter operator (lt, gte, contains, etc.)
-- `type` - Type casting function (int, date, string, etc.)
-- `value` - The value to filter by
+- `type` - Type casting function (int, date, string, null, etc.)
+- `value` - The value to filter by (omitted for null())
 
 **Examples:**
 ```
@@ -653,6 +773,8 @@ name:contains+string(laptop)
 createdAt:gte+date(2025-01-01)
 category.name:electronics
 qty:lte+field(minStock)
+categoryId:null()
+email:not+null()
 ```
 
 ---
@@ -669,7 +791,20 @@ GET /products?filter=price:gte+int(100)
 GET /products?filter=price:gte+100
 ```
 
-### 2. Configure Timezone
+### 2. Use Explicit NULL Checks
+
+```bash
+# ✅ Good - Explicit null check
+GET /products?filter=categoryId:null()
+
+# ✅ Good - Explicit not null check
+GET /products?filter=categoryId:not+null()
+
+# ❌ Avoid - Unclear intent
+GET /products?filter=categoryId:
+```
+
+### 3. Configure Timezone
 
 ```typescript
 // ✅ Good - Configure once at startup
@@ -678,7 +813,7 @@ configurePipesTimezone({ offset: '+07:00' });
 // ❌ Bad - No timezone configuration (defaults to UTC)
 ```
 
-### 3. Use Field References in Service Layer
+### 4. Use Field References in Service Layer
 
 ```typescript
 // ✅ Good - Proper field reference conversion
@@ -693,7 +828,7 @@ async findAll(where?: Pipes.Where) {
 }
 ```
 
-### 4. Validate Input
+### 5. Validate Input
 
 ```typescript
 // ✅ Good - Add validation
@@ -707,7 +842,7 @@ async findAll(
 }
 ```
 
-### 5. Use Indexes
+### 6. Use Indexes
 
 ```prisma
 // ✅ Good - Add indexes for frequently filtered fields
@@ -720,6 +855,17 @@ model Product {
   @@index([price])
   @@index([category])
   @@index([createdAt])
+}
+```
+
+### 7. Handle NULL in Optional Relations
+
+```prisma
+// ✅ Good - Make optional relations nullable
+model Product {
+  id         String    @id
+  categoryId String?   // Nullable
+  category   Category? @relation(fields: [categoryId], references: [id])
 }
 ```
 
@@ -773,6 +919,39 @@ model Product {
   categoryId String
 }
 ```
+
+### Issue 4: NULL Filter on Non-Nullable Field
+
+**Problem:**
+```bash
+GET /products?filter=id:null()
+# Error: id cannot be null
+```
+
+**Solution:**
+```prisma
+// Ensure field is nullable in schema
+model Product {
+  id         String  @id
+  categoryId String? // ✅ Make nullable with ?
+}
+```
+
+---
+
+## Type Casting Reference
+
+| Type | Syntax | Example | Output |
+|------|--------|---------|--------|
+| Integer | `int(value)` | `int(100)` | `100` |
+| Float | `float(value)` | `float(10.5)` | `10.5` |
+| String | `string(value)` | `string(text)` | `"text"` |
+| Boolean | `bool(value)` | `bool(true)` | `true` |
+| Date | `date(value)` | `date(2025-01-01)` | `"2025-01-01T00:00:00+07:00"` |
+| DateTime | `datetime(value)` | `datetime(2025-01-01T10:00:00)` | `"2025-01-01T10:00:00+07:00"` |
+| Array | `array(v1,v2)` | `array(a,b,c)` | `["a","b","c"]` |
+| Field | `field(name)` | `field(minStock)` | `{ _ref: "minStock", _isFieldRef: true }` |
+| Null | `null()` | `null()` | `null` |
 
 ---
 

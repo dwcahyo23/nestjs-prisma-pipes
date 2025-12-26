@@ -21,6 +21,12 @@ const FILTER_OPERATORS = [
     'every', 'some', 'none',
     'in', 'has', 'hasEvery', 'hasSome',
 ];
+function parseStringToNull(ruleValue) {
+    if (!ruleValue.endsWith(')') || !ruleValue.startsWith('null(')) {
+        return null;
+    }
+    return null;
+}
 const TYPE_PARSERS = {
     int: parseStringToInt,
     date: parseStringToDate,
@@ -31,6 +37,7 @@ const TYPE_PARSERS = {
     bool: parseStringToBoolean,
     array: parseStringToArray,
     field: parseFieldReference,
+    null: parseStringToNull,
 };
 function extractParenthesesContent(input) {
     const match = /\(([^)]+)\)/.exec(input);

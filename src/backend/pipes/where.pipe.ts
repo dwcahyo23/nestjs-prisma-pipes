@@ -10,7 +10,7 @@ import { decodePipeQuery } from '../utils/crypto.utils';
 /**
  * Type definitions for better type safety
  */
-type PrimitiveValue = string | number | boolean;
+type PrimitiveValue = string | number | boolean | null
 type ParsedValue = PrimitiveValue | PrimitiveValue[] | Record<string, any>;
 
 /**
@@ -26,6 +26,16 @@ const FILTER_OPERATORS = [
 type FilterOperator = typeof FILTER_OPERATORS[number];
 
 /**
+ * Parse null value
+ */
+function parseStringToNull(ruleValue: string): null {
+	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('null(')) {
+		return null;
+	}
+	return null;
+}
+
+/**
  * Type parsers registry for better extensibility
  */
 const TYPE_PARSERS: Record<string, (value: string) => ParsedValue> = {
@@ -38,6 +48,7 @@ const TYPE_PARSERS: Record<string, (value: string) => ParsedValue> = {
 	bool: parseStringToBoolean,
 	array: parseStringToArray,
 	field: parseFieldReference,
+	null: parseStringToNull,
 };
 
 /**
