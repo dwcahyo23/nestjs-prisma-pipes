@@ -1,6 +1,6 @@
 {
 	"name": "@dwcahyo/nestjs-prisma-pipes",
-	"version": "2.5.4",
+	"version": "2.5.5",
 	"publishConfig": {
 		"access": "public"
 	},
