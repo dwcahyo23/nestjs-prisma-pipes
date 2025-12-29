@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import parseObjectLiteral from '../helpers/parse-object-literal';
-
 import delimetedStringObject from '../helpers/delimeted-string-object';
 import deepMerge from '../helpers/deep-merge';
 import TimezoneService from './timezone.service';
@@ -10,7 +9,7 @@ import { decodePipeQuery } from '../utils/crypto.utils';
 /**
  * Type definitions for better type safety
  */
-type PrimitiveValue = string | number | boolean | null
+type PrimitiveValue = string | number | boolean | null;
 type ParsedValue = PrimitiveValue | PrimitiveValue[] | Record<string, any>;
 
 /**
@@ -26,19 +25,27 @@ const FILTER_OPERATORS = [
 type FilterOperator = typeof FILTER_OPERATORS[number];
 
 /**
- * Parse null value
+ * Relation filter operators (for nested queries)
  */
-function parseStringToNull(ruleValue: string): null {
-	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('null(')) {
+const RELATION_OPERATORS = ['is', 'isNot', 'some', 'every', 'none'] as const;
+
+/**
+ * Parse null value - ONLY accepts null() format
+ * Returns null for valid null() format
+ */
+function parseStringToNull(ruleValue: string): null | undefined {
+	// Must be exactly "null()" with no content inside
+	if (ruleValue === 'null()') {
 		return null;
 	}
-	return null;
+	// Return undefined to indicate invalid format
+	return undefined;
 }
 
 /**
  * Type parsers registry for better extensibility
  */
-const TYPE_PARSERS: Record<string, (value: string) => ParsedValue> = {
+const TYPE_PARSERS: Record<string, (value: string) => ParsedValue | undefined> = {
 	int: parseStringToInt,
 	date: parseStringToDate,
 	datetime: parseStringToDate,
@@ -55,71 +62,69 @@ const TYPE_PARSERS: Record<string, (value: string) => ParsedValue> = {
  * Extract value from parentheses
  */
 function extractParenthesesContent(input: string): string | null {
-	const match = /\(([^)]+)\)/.exec(input);
+	const match = /\(([^)]*)\)/.exec(input);
 	return match ? match[1] : null;
 }
 
 /**
  * Parse a string to an integer
  */
-function parseStringToInt(ruleValue: string): number {
+function parseStringToInt(ruleValue: string): number | undefined {
 	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('int(')) {
-		return 0;
+		return undefined;
 	}
 	const content = extractParenthesesContent(ruleValue);
-	return content ? parseInt(content, 10) : 0;
+	return content ? parseInt(content, 10) : undefined;
 }
 
 /**
  * Parse a string to a date
  */
-function parseStringToDate(ruleValue: string): string {
+function parseStringToDate(ruleValue: string): string | undefined {
 	const validPrefixes = ['date(', 'datetime('];
 	const hasValidPrefix = validPrefixes.some(prefix => ruleValue.startsWith(prefix));
 
 	if (!ruleValue.endsWith(')') || !hasValidPrefix) {
-		return '';
+		return undefined;
 	}
 
 	const content = extractParenthesesContent(ruleValue);
-	if (!content) return '';
+	if (!content) return undefined;
 
-	// ✅ Use TimezoneService to add timezone
 	const dateString = TimezoneService.addTimezoneToDateString(content);
-
 	return new Date(dateString).toISOString();
 }
 
 /**
  * Parse a string to a float
  */
-function parseStringToFloat(ruleValue: string): number {
+function parseStringToFloat(ruleValue: string): number | undefined {
 	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('float(')) {
-		return 0;
+		return undefined;
 	}
 	const content = extractParenthesesContent(ruleValue);
-	return content ? parseFloat(content) : 0;
+	return content ? parseFloat(content) : undefined;
 }
 
 /**
  * Parse a string to a string
  */
-function parseStringToString(ruleValue: string): string {
+function parseStringToString(ruleValue: string): string | undefined {
 	if (!ruleValue.endsWith(')') || !ruleValue.startsWith('string(')) {
-		return '';
+		return undefined;
 	}
-	return extractParenthesesContent(ruleValue) || '';
+	return extractParenthesesContent(ruleValue) || undefined;
 }
 
 /**
  * Parse a string to a boolean
  */
-function parseStringToBoolean(ruleValue: string): boolean {
+function parseStringToBoolean(ruleValue: string): boolean | undefined {
 	const validPrefixes = ['boolean(', 'bool('];
 	const hasValidPrefix = validPrefixes.some(prefix => ruleValue.startsWith(prefix));
 
 	if (!ruleValue.endsWith(')') || !hasValidPrefix) {
-		return false;
+		return undefined;
 	}
 
 	const content = extractParenthesesContent(ruleValue);
@@ -129,9 +134,9 @@ function parseStringToBoolean(ruleValue: string): boolean {
 /**
  * Parse a string to an array
  */
-function parseStringToArray(ruleValue: string): PrimitiveValue[] {
+function parseStringToArray(ruleValue: string): PrimitiveValue[] | undefined {
 	if (!ruleValue.startsWith('array(')) {
-		return [];
+		return undefined;
 	}
 
 	const match = /\(([^]+)\)/.exec(ruleValue);
@@ -141,47 +146,35 @@ function parseStringToArray(ruleValue: string): PrimitiveValue[] {
 
 	return match[1].split(',').map((value) => {
 		const trimmedValue = value.trim();
-		return parseValue(trimmedValue) as PrimitiveValue;
+		const parsed = parseValue(trimmedValue);
+		return parsed !== undefined ? (parsed as PrimitiveValue) : trimmedValue;
 	});
 }
 
 /**
  * Parse field reference for field-to-field comparison
- * 
- * @example 
- * Simple field: field(recQty) → { _ref: 'recQty', _isFieldRef: true }
- * 
- * @example
- * Nested relation field: field(user.balance) → { _ref: 'user.balance', _isFieldRef: true }
- * 
- * @example
- * Cross-table comparison (NEW):
- * field($parent.createdAt) → { _ref: '$parent.createdAt', _isFieldRef: true, _scope: 'parent' }
- * field($root.orderDate) → { _ref: '$root.orderDate', _isFieldRef: true, _scope: 'root' }
  */
-function parseFieldReference(ruleValue: string): Record<string, any> {
+function parseFieldReference(ruleValue: string): Record<string, any> | undefined {
 	if (!ruleValue.startsWith('field(') || !ruleValue.endsWith(')')) {
-		return {};
+		return undefined;
 	}
 
 	const fieldPath = extractParenthesesContent(ruleValue);
 	if (!fieldPath) {
-		return {};
+		return undefined;
 	}
 
-	// Check for special scope markers
 	let scope: string | undefined;
 	let cleanPath = fieldPath;
 
 	if (fieldPath.startsWith('$parent.')) {
 		scope = 'parent';
-		cleanPath = fieldPath.substring(8); // Remove '$parent.'
+		cleanPath = fieldPath.substring(8);
 	} else if (fieldPath.startsWith('$root.')) {
 		scope = 'root';
-		cleanPath = fieldPath.substring(6); // Remove '$root.'
+		cleanPath = fieldPath.substring(6);
 	}
 
-	// Return a special object that marks this as a field reference
 	const result: Record<string, any> = {
 		_ref: cleanPath,
 		_isFieldRef: true
@@ -203,21 +196,19 @@ function isFieldReference(value: any): boolean {
 
 /**
  * Convert field reference to a format that can be identified by service layer
- * Returns the field reference object that service layer should convert to prisma.model.fields.fieldName
  */
 function convertToFieldReference(fieldRef: any): Record<string, any> {
-	// Type guard to ensure we have a field reference object
 	if (typeof fieldRef === 'object' && fieldRef !== null && '_ref' in fieldRef && '_isFieldRef' in fieldRef) {
-		return fieldRef; // Return the whole object so service can identify it
+		return fieldRef;
 	}
-	// Fallback: return empty object if not a valid field reference
 	return {};
 }
 
 /**
  * Detect type from string and parse accordingly
+ * Returns undefined if no valid parser found
  */
-function parseValue(ruleValue: string): ParsedValue {
+function parseValue(ruleValue: string): ParsedValue | undefined {
 	// Check for typed values
 	for (const [type, parser] of Object.entries(TYPE_PARSERS)) {
 		if (ruleValue.startsWith(`${type}(`)) {
@@ -225,7 +216,12 @@ function parseValue(ruleValue: string): ParsedValue {
 		}
 	}
 
-	// Return as-is if no type detected
+	// Check if it's the plain word "null" (without parentheses) - treat as string
+	if (ruleValue === 'null') {
+		return 'null'; // Return as string, not null value
+	}
+
+	// Return as-is if no type detected (implicit string)
 	return ruleValue;
 }
 
@@ -246,35 +242,31 @@ function extractOperatorAndValue(ruleValue: string): { operator: string | null; 
 }
 
 /**
- * @description Convert a string with field-to-field comparison support
+ * @description Convert query string to Prisma where clause with comprehensive null handling
  * 
- * @example Basic comparison
- * "id: int(1), firstName: banana" → { id: 1, firstName: "banana" }
+ * According to Prisma documentation, both formats are valid:
+ * 1. Direct assignment: { field: null }
+ * 2. Explicit equals: { field: { equals: null } }
  * 
- * @example Date range
- * "createdAt: gte date(2024-01-01), createdAt: lte date(2024-12-31)" 
- * → { createdAt: { gte: "2024-01-01T00:00:00.000Z", lte: "2024-12-31T00:00:00.000Z" } }
+ * WherePipe supports both through the null() function:
  * 
- * @example Same-table field comparison
- * "qty: lte field(recQty)" → { qty: { lte: { _ref: "recQty", _isFieldRef: true } } }
+ * @example NULL checks - Direct assignment (no operator)
+ * "categoryId: null()" → { categoryId: null }
  * 
- * @example Cross-table comparison (NEW)
- * "mesin.some.userMesin.some.createdAt: lte field($parent.createdAt)"
- * → {
- *     mesin: {
- *       some: {
- *         userMesin: {
- *           some: {
- *             createdAt: { 
- *               lte: { _ref: "createdAt", _isFieldRef: true, _scope: "parent" } 
- *             }
- *           }
- *         }
- *       }
- *     }
- *   }
+ * @example NULL checks - Explicit equals
+ * "categoryId: equals null()" → { categoryId: { equals: null } }
  * 
- * This enables: userMesin.createdAt <= workorder.createdAt
+ * @example NOT NULL checks
+ * "categoryId: not null()" → { categoryId: { not: null } }
+ * 
+ * @example Relationship NULL checks
+ * "category: null()" → { category: null }  // Check if relationship exists
+ * "category.name: null()" → { category: { name: null } }  // Check field in relationship
+ * 
+ * @example Many relationship NULL checks
+ * "reviews.some.comment: null()" → { reviews: { some: { comment: null } } }
+ * 
+ * @see https://www.prisma.io/docs/orm/prisma-client/special-fields-and-types/null-and-undefined
  */
 @Injectable()
 export default class WherePipe implements PipeTransform {
@@ -284,19 +276,15 @@ export default class WherePipe implements PipeTransform {
 		}
 
 		try {
-			// Extract client IP from metadata
 			const clientIp = metadata?.data?.clientIp;
-
-			// Decode secure query
 			const decodedValue = decodePipeQuery(value, clientIp);
-
 			const rules = parseObjectLiteral(decodedValue);
 			let items: Record<string, any> = {};
 
 			for (const rule of rules) {
 				const [ruleKey, ruleValue] = rule;
 
-				// Skip empty values
+				// Skip if no value provided
 				if (ruleValue == null || ruleValue === '') {
 					continue;
 				}
@@ -304,23 +292,43 @@ export default class WherePipe implements PipeTransform {
 				const { operator, value: rawValue } = extractOperatorAndValue(ruleValue);
 				const parsedValue = parseValue(rawValue);
 
-				// Determine the final value based on operator and field reference
+				// Validate null() usage - help users use correct format
+				if (rawValue.includes('null') && parsedValue === undefined) {
+					throw new BadRequestException(
+						`Invalid null format in "${ruleKey}". Use null() not null. Examples: "field: null()" or "field: not null()"`
+					);
+				}
+
+				// Skip if parsing failed completely
+				if (parsedValue === undefined) {
+					console.warn(`Skipping invalid value for ${ruleKey}: ${rawValue}`);
+					continue;
+				}
+
+				// Determine the final value based on Prisma conventions
 				let finalValue: any;
 
 				if (operator) {
-					// Has operator: wrap in operator object
+					// Has operator: always wrap in operator object
+					// Examples:
+					// - equals null() → { equals: null }
+					// - not null() → { not: null }
 					if (isFieldReference(parsedValue)) {
 						finalValue = { [operator]: convertToFieldReference(parsedValue) };
 					} else {
 						finalValue = { [operator]: parsedValue };
 					}
 				} else {
-					// No operator
+					// No operator: direct assignment for simple values
+					// Examples:
+					// - null() → null (direct assignment)
+					// - field(qty) → { equals: field_ref } (wrap field refs)
 					if (isFieldReference(parsedValue)) {
-						// Field reference without operator: wrap in equals
+						// Field references need explicit equals even without operator
 						finalValue = { equals: convertToFieldReference(parsedValue) };
 					} else {
-						// Regular value without operator: use as-is
+						// Direct assignment for null and other simple values
+						// This follows Prisma convention: { field: null } is valid
 						finalValue = parsedValue;
 					}
 				}
@@ -335,7 +343,6 @@ export default class WherePipe implements PipeTransform {
 						// Merge objects (for date ranges, multiple operators on same field)
 						items[ruleKey] = { ...items[ruleKey], ...finalValue };
 					} else {
-						// Simple assignment
 						items[ruleKey] = finalValue;
 					}
 				}
@@ -343,6 +350,9 @@ export default class WherePipe implements PipeTransform {
 
 			return items;
 		} catch (error) {
+			if (error instanceof BadRequestException) {
+				throw error;
+			}
 			console.error('Error parsing query string:', error);
 			throw new BadRequestException('Invalid query format');
 		}

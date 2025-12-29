@@ -21,11 +21,12 @@ const FILTER_OPERATORS = [
     'every', 'some', 'none',
     'in', 'has', 'hasEvery', 'hasSome',
 ];
+const RELATION_OPERATORS = ['is', 'isNot', 'some', 'every', 'none'];
 function parseStringToNull(ruleValue) {
-    if (!ruleValue.endsWith(')') || !ruleValue.startsWith('null(')) {
+    if (ruleValue === 'null()') {
         return null;
     }
-    return null;
+    return undefined;
 }
 const TYPE_PARSERS = {
     int: parseStringToInt,
@@ -40,53 +41,53 @@ const TYPE_PARSERS = {
     null: parseStringToNull,
 };
 function extractParenthesesContent(input) {
-    const match = /\(([^)]+)\)/.exec(input);
+    const match = /\(([^)]*)\)/.exec(input);
     return match ? match[1] : null;
 }
 function parseStringToInt(ruleValue) {
     if (!ruleValue.endsWith(')') || !ruleValue.startsWith('int(')) {
-        return 0;
+        return undefined;
     }
     const content = extractParenthesesContent(ruleValue);
-    return content ? parseInt(content, 10) : 0;
+    return content ? parseInt(content, 10) : undefined;
 }
 function parseStringToDate(ruleValue) {
     const validPrefixes = ['date(', 'datetime('];
     const hasValidPrefix = validPrefixes.some(prefix => ruleValue.startsWith(prefix));
     if (!ruleValue.endsWith(')') || !hasValidPrefix) {
-        return '';
+        return undefined;
     }
     const content = extractParenthesesContent(ruleValue);
     if (!content)
-        return '';
+        return undefined;
     const dateString = timezone_service_1.default.addTimezoneToDateString(content);
     return new Date(dateString).toISOString();
 }
 function parseStringToFloat(ruleValue) {
     if (!ruleValue.endsWith(')') || !ruleValue.startsWith('float(')) {
-        return 0;
+        return undefined;
     }
     const content = extractParenthesesContent(ruleValue);
-    return content ? parseFloat(content) : 0;
+    return content ? parseFloat(content) : undefined;
 }
 function parseStringToString(ruleValue) {
     if (!ruleValue.endsWith(')') || !ruleValue.startsWith('string(')) {
-        return '';
+        return undefined;
     }
-    return extractParenthesesContent(ruleValue) || '';
+    return extractParenthesesContent(ruleValue) || undefined;
 }
 function parseStringToBoolean(ruleValue) {
     const validPrefixes = ['boolean(', 'bool('];
     const hasValidPrefix = validPrefixes.some(prefix => ruleValue.startsWith(prefix));
     if (!ruleValue.endsWith(')') || !hasValidPrefix) {
-        return false;
+        return undefined;
     }
     const content = extractParenthesesContent(ruleValue);
     return content === 'true';
 }
 function parseStringToArray(ruleValue) {
     if (!ruleValue.startsWith('array(')) {
-        return [];
+        return undefined;
     }
     const match = /\(([^]+)\)/.exec(ruleValue);
     if (!match || !match[1]) {
@@ -94,16 +95,17 @@ function parseStringToArray(ruleValue) {
     }
     return match[1].split(',').map((value) => {
         const trimmedValue = value.trim();
-        return parseValue(trimmedValue);
+        const parsed = parseValue(trimmedValue);
+        return parsed !== undefined ? parsed : trimmedValue;
     });
 }
 function parseFieldReference(ruleValue) {
     if (!ruleValue.startsWith('field(') || !ruleValue.endsWith(')')) {
-        return {};
+        return undefined;
     }
     const fieldPath = extractParenthesesContent(ruleValue);
     if (!fieldPath) {
-        return {};
+        return undefined;
     }
     let scope;
     let cleanPath = fieldPath;
@@ -139,6 +141,9 @@ function parseValue(ruleValue) {
             return parser(ruleValue);
         }
     }
+    if (ruleValue === 'null') {
+        return 'null';
+    }
     return ruleValue;
 }
 function extractOperatorAndValue(ruleValue) {
@@ -169,6 +174,13 @@ let WherePipe = class WherePipe {
                 }
                 const { operator, value: rawValue } = extractOperatorAndValue(ruleValue);
                 const parsedValue = parseValue(rawValue);
+                if (rawValue.includes('null') && parsedValue === undefined) {
+                    throw new common_1.BadRequestException(`Invalid null format in "${ruleKey}". Use null() not null. Examples: "field: null()" or "field: not null()"`);
+                }
+                if (parsedValue === undefined) {
+                    console.warn(`Skipping invalid value for ${ruleKey}: ${rawValue}`);
+                    continue;
+                }
                 let finalValue;
                 if (operator) {
                     if (isFieldReference(parsedValue)) {
@@ -202,6 +214,9 @@ let WherePipe = class WherePipe {
             return items;
         }
         catch (error) {
+            if (error instanceof common_1.BadRequestException) {
+                throw error;
+            }
             console.error('Error parsing query string:', error);
             throw new common_1.BadRequestException('Invalid query format');
         }

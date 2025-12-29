@@ -1,6 +1,6 @@
 # WherePipe - Complete Documentation
 
-Transform query strings into Prisma `where` clauses with advanced filtering, type casting, and field-to-field comparison.
+Transform query strings into Prisma `where` clauses with advanced filtering, type casting, field-to-field comparison, and comprehensive NULL handling.
 
 ---
 
@@ -10,12 +10,18 @@ Transform query strings into Prisma `where` clauses with advanced filtering, typ
 - [Basic Usage](#basic-usage)
 - [Operators](#operators)
 - [Type Casting](#type-casting)
+  - [Integer, Float, String, Boolean](#basic-types)
+  - [Date & DateTime](#date--datetime)
+  - [Array](#array)
+  - [Field Reference](#field-reference)
+  - [NULL Handling](#null-handling)
 - [Field-to-Field Comparison](#field-to-field-comparison)
 - [Nested Relations](#nested-relations)
 - [Multiple Conditions](#multiple-conditions)
 - [Advanced Examples](#advanced-examples)
 - [API Reference](#api-reference)
 - [Best Practices](#best-practices)
+- [Common Issues](#common-issues)
 
 ---
 
@@ -24,12 +30,12 @@ Transform query strings into Prisma `where` clauses with advanced filtering, typ
 WherePipe transforms URL query strings into Prisma-compatible `where` objects, supporting:
 
 - ✅ 15+ filter operators
-- ✅ 9 type casting functions (including null handling)
+- ✅ 9 type casting functions (including comprehensive null handling)
 - ✅ Field-to-field comparison
 - ✅ Nested relation filtering
 - ✅ Timezone-aware dates
 - ✅ Multiple conditions with AND/OR logic
-- ✅ NULL and NOT NULL checks
+- ✅ NULL and NOT NULL checks (Prisma-compliant)
 
 ---
 
@@ -152,7 +158,9 @@ GET /products?filter=items.every.status:completed
 
 ## Type Casting
 
-### Integer - `int()`
+### Basic Types
+
+#### Integer - `int()`
 
 Parse strings to integers.
 
@@ -172,7 +180,7 @@ GET /products?filter=stock:lt+int(50)
 }
 ```
 
-### Float - `float()`
+#### Float - `float()`
 
 Parse strings to floating-point numbers.
 
@@ -192,7 +200,7 @@ GET /products?filter=weight:lte+float(2.5)
 }
 ```
 
-### String - `string()`
+#### String - `string()`
 
 Explicit string values (useful for values containing special characters).
 
@@ -212,7 +220,7 @@ GET /products?filter=name:contains+string(laptop)
 }
 ```
 
-### Boolean - `bool()` or `boolean()`
+#### Boolean - `bool()` or `boolean()`
 
 Parse boolean values.
 
@@ -232,7 +240,11 @@ GET /products?filter=featured:equals+bool(false)
 }
 ```
 
-### Date - `date()` or `datetime()`
+---
+
+### Date & DateTime
+
+#### Date - `date()` or `datetime()`
 
 Parse date strings with timezone support.
 
@@ -266,7 +278,11 @@ import { configurePipesTimezone } from '@dwcahyo/nestjs-prisma-pipes';
 configurePipesTimezone({ offset: '+07:00', name: 'Asia/Jakarta' });
 ```
 
-### Array - `array()`
+---
+
+### Array
+
+#### Array - `array()`
 
 Parse comma-separated values into arrays.
 
@@ -286,66 +302,11 @@ GET /products?filter=tags:hasSome+array(sale,featured)
 }
 ```
 
-### Null - `null()`
+---
 
-Check for NULL and NOT NULL values.
+### Field Reference
 
-```bash
-# Products without category (NULL)
-GET /products?filter=categoryId:null()
-
-# Products without category (explicit equals)
-GET /products?filter=categoryId:equals+null()
-
-# Products WITH category (NOT NULL)
-GET /products?filter=categoryId:not+null()
-
-# Users without email
-GET /users?filter=email:null()
-
-# Orders with tracking number
-GET /orders?filter=trackingNumber:not+null()
-```
-
-**Prisma output:**
-```typescript
-// categoryId:null()
-{ categoryId: null }
-
-// categoryId:equals+null()
-{ categoryId: { equals: null } }
-
-// categoryId:not+null()
-{ categoryId: { not: null } }
-
-// email:null()
-{ email: null }
-
-// trackingNumber:not+null()
-{ trackingNumber: { not: null } }
-```
-
-**Common use cases:**
-
-| Query | Description | Prisma Output |
-|-------|-------------|---------------|
-| `field:null()` | Field is NULL | `{ field: null }` |
-| `field:equals+null()` | Field is NULL (explicit) | `{ field: { equals: null } }` |
-| `field:not+null()` | Field is NOT NULL | `{ field: { not: null } }` |
-
-**Examples with combinations:**
-```bash
-# Active products without category
-GET /products?filter=active:bool(true),categoryId:null()
-
-# Users with email but no phone
-GET /users?filter=email:not+null(),phone:null()
-
-# Recent orders without tracking
-GET /orders?filter=createdAt:gte+date(2025-12-01),trackingNumber:null()
-```
-
-### Field Reference - `field()`
+#### Field Reference - `field()`
 
 Compare with another field in the same table.
 
@@ -375,6 +336,334 @@ async findAll(where?: Pipes.Where) {
 ```
 
 [📖 Read more about Field References](./FIELD_REFERENCE.md)
+
+---
+
+### NULL Handling
+
+#### Overview
+
+WherePipe provides comprehensive NULL handling following official [Prisma conventions](https://www.prisma.io/docs/orm/prisma-client/special-fields-and-types/null-and-undefined).
+
+**Key Principle:** According to Prisma documentation, both direct assignment and explicit equals are valid:
+
+```typescript
+// Both are valid in Prisma:
+{ field: null }                  // Direct assignment
+{ field: { equals: null } }      // Explicit equals
+
+// Both generate: WHERE field IS NULL
+```
+
+#### WherePipe NULL Syntax
+
+**🔒 Strict Rule:** Always use `null()` function format (never plain `null`)
+
+```bash
+# ✅ CORRECT - Function format
+field: null()
+
+# ❌ INCORRECT - Plain null (will throw error)
+field: null
+```
+
+#### Quick Reference
+
+| Query | Prisma Output | Description |
+|-------|---------------|-------------|
+| `field: null()` | `{ field: null }` | Field is NULL (direct assignment) |
+| `field: equals null()` | `{ field: { equals: null } }` | Field is NULL (explicit) |
+| `field: not null()` | `{ field: { not: null } }` | Field is NOT NULL |
+
+#### Simple Field NULL Checks
+
+**Check if Field is NULL:**
+
+```bash
+# Products without category
+GET /products?filter=categoryId:null()
+
+# Users without phone number
+GET /users?filter=phone:null()
+
+# Orders without tracking
+GET /orders?filter=trackingNumber:null()
+```
+
+**Prisma Output:**
+```typescript
+{
+  categoryId: null,      // Direct assignment (default)
+  phone: null,
+  trackingNumber: null
+}
+```
+
+**Check if Field is NOT NULL:**
+
+```bash
+# Products WITH category
+GET /products?filter=categoryId:not+null()
+
+# Users WITH phone number
+GET /users?filter=phone:not+null()
+```
+
+**Prisma Output:**
+```typescript
+{
+  categoryId: { not: null },
+  phone: { not: null }
+}
+```
+
+**Explicit Equals NULL:**
+
+```bash
+# Explicit NULL check (same result as direct)
+GET /products?filter=categoryId:equals+null()
+```
+
+**Prisma Output:**
+```typescript
+{
+  categoryId: { equals: null }
+}
+```
+
+#### Relationship NULL Checks
+
+**Important Distinction:**
+
+| Check | Syntax | What it checks |
+|-------|--------|----------------|
+| Foreign Key | `categoryId:null()` | If FK is NULL |
+| Relationship | `category:null()` | If relationship exists |
+| Field in Relation | `category.name:null()` | If field inside relation is NULL |
+
+**Examples:**
+
+```bash
+# 1. Check if relationship EXISTS
+GET /products?filter=category:null()           # No category relationship
+GET /products?filter=category:not+null()       # Has category relationship
+
+# 2. Check specific FIELD in relationship
+GET /products?filter=category.name:null()      # Category exists but name is NULL
+GET /products?filter=category.is.name:null()   # Explicit relation filter
+```
+
+**Prisma Output:**
+```typescript
+// category:null()
+{ category: null }
+
+// category.name:null()
+{
+  category: {
+    name: null        // Category exists but name is NULL
+  }
+}
+
+// category.is.name:null()
+{
+  category: {
+    is: { name: null }
+  }
+}
+```
+
+#### Many Relationship NULL Checks
+
+```bash
+# Products with SOME reviews that have NULL comment
+GET /products?filter=reviews.some.comment:null()
+
+# Products with NO reviews that have NULL comment
+GET /products?filter=reviews.none.comment:null()
+
+# Products where EVERY review has NULL rating
+GET /products?filter=reviews.every.rating:null()
+```
+
+**Prisma Output:**
+```typescript
+{
+  reviews: {
+    some: { comment: null },
+    none: { comment: null },
+    every: { rating: null }
+  }
+}
+```
+
+#### Common NULL Patterns
+
+**1. Incomplete Data Checks:**
+
+```bash
+# Users with email but no phone
+GET /users?filter=email:not+null(),phone:null()
+
+# Products with name but no description
+GET /products?filter=name:not+null(),description:null()
+```
+
+**2. Optional Relations:**
+
+```bash
+# Products without category
+GET /products?filter=category:null()
+
+# Orders without tracking
+GET /orders?filter=trackingNumber:null()
+```
+
+**3. Combining with Other Filters:**
+
+```bash
+# Active products without category
+GET /products?filter=active:bool(true),categoryId:null()
+
+# Recent orders without tracking
+GET /orders?filter=createdAt:gte+date(2025-12-01),trackingNumber:null()
+
+# Users with verified email but no phone
+GET /users?filter=emailVerified:bool(true),email:not+null(),phone:null()
+```
+
+**4. Complex Relationship Checks:**
+
+```bash
+# Products with category but category has no description
+GET /products?filter=category:not+null(),category.description:null()
+
+# Orders with customer but customer has no phone
+GET /orders?filter=customer:not+null(),customer.phone:null()
+```
+
+#### NULL Decision Tree
+
+```
+┌─────────────────────────────────────┐
+│ What are you checking for NULL?    │
+└─────────────────────────────────────┘
+                │
+        ┌───────┴───────┐
+        │               │
+    ┌───▼────┐     ┌────▼────┐
+    │Foreign │     │Relation │
+    │Key ID  │     │Object   │
+    └───┬────┘     └────┬────┘
+        │               │
+┌───────▼─────────┐ ┌──▼────────────────┐
+│categoryId:null()│ │category:null()    │
+│                 │ │                   │
+│Checks if FK     │ │Checks if relation │
+│is NULL          │ │exists             │
+└─────────────────┘ └───────────────────┘
+                        │
+            ┌───────────▼──────────────┐
+            │Field inside relationship?│
+            └───────────┬──────────────┘
+                        │
+                ┌───────┴────────┐
+                │                │
+        ┌───────▼──────┐  ┌──────▼────────┐
+        │category.name:│  │reviews.some.  │
+        │null()        │  │comment:null() │
+        │              │  │               │
+        │Field in      │  │Field in many  │
+        │relation      │  │relation       │
+        └──────────────┘  └───────────────┘
+```
+
+#### NULL Error Handling
+
+WherePipe provides clear error messages for invalid NULL formats:
+
+```typescript
+// ❌ Invalid: plain "null" without ()
+GET /products?filter=categoryId:null
+
+// Error Response:
+{
+  "statusCode": 400,
+  "message": "Invalid null format in \"categoryId\". Use null() not null. Examples: \"field: null()\" or \"field: not null()\""
+}
+```
+
+**Common Mistakes:**
+
+| Mistake | Error | Solution |
+|---------|-------|----------|
+| Using `null` | Invalid format | Use `null()` |
+| `null(value)` | Must be empty | Use `null()` |
+| `NULL()` | Not recognized | Use lowercase `null()` |
+
+#### NULL Schema Requirements
+
+For NULL checks to work, fields must be nullable in Prisma schema:
+
+```prisma
+model Product {
+  id          String    @id @default(cuid())
+  name        String
+  
+  // ✅ Nullable fields (can use null())
+  categoryId  String?   // Optional foreign key
+  description String?   // Optional field
+  deletedAt   DateTime? // Soft delete
+  
+  // ✅ Optional relation
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  // ❌ NOT nullable (null() will cause error)
+  // price       Decimal   // Required field
+  // createdAt   DateTime  // Required field
+}
+```
+
+#### NULL Best Practices
+
+**1. Always use `null()` function:**
+```bash
+# ✅ Good
+GET /products?filter=categoryId:null()
+
+# ❌ Bad
+GET /products?filter=categoryId:null
+```
+
+**2. Be explicit about intent:**
+```bash
+# Check foreign key
+categoryId:null()
+
+# Check relationship
+category:null()
+
+# Check field in relationship
+category.name:null()
+```
+
+**3. Use appropriate format:**
+```bash
+# Direct assignment (simpler)
+field:null()
+
+# Explicit equals (more verbose)
+field:equals+null()
+
+# NOT NULL
+field:not+null()
+```
+
+**4. Combine logically:**
+```bash
+# Clear, readable filters
+GET /users?filter=email:not+null(),emailVerified:bool(true),phone:null()
+```
 
 ---
 
@@ -461,7 +750,7 @@ GET /products?filter=category.name:electronics
 # Users with premium profile
 GET /users?filter=profile.tier:premium
 
-# Products without category
+# Products where category name is NULL
 GET /products?filter=category.name:null()
 ```
 
@@ -501,7 +790,8 @@ GET /products?filter=reviews.some.comment:null()
   reviews: {
     some: { rating: { equals: 5 } },
     every: { approved: { equals: true } },
-    none: { status: 'pending' }
+    none: { status: 'pending' },
+    some: { comment: null }
   }
 }
 ```
@@ -800,11 +1090,24 @@ GET /products?filter=categoryId:null()
 # ✅ Good - Explicit not null check
 GET /products?filter=categoryId:not+null()
 
-# ❌ Avoid - Unclear intent
-GET /products?filter=categoryId:
+# ❌ Avoid - Invalid format
+GET /products?filter=categoryId:null
 ```
 
-### 3. Configure Timezone
+### 3. Be Clear About NULL Intent
+
+```bash
+# ✅ Good - Check foreign key
+GET /products?filter=categoryId:null()
+
+# ✅ Good - Check relationship
+GET /products?filter=category:null()
+
+# ✅ Good - Check field in relationship
+GET /products?filter=category.name:null()
+```
+
+### 4. Configure Timezone
 
 ```typescript
 // ✅ Good - Configure once at startup
@@ -813,7 +1116,7 @@ configurePipesTimezone({ offset: '+07:00' });
 // ❌ Bad - No timezone configuration (defaults to UTC)
 ```
 
-### 4. Use Field References in Service Layer
+### 5. Use Field References in Service Layer
 
 ```typescript
 // ✅ Good - Proper field reference conversion
@@ -828,7 +1131,7 @@ async findAll(where?: Pipes.Where) {
 }
 ```
 
-### 5. Validate Input
+### 6. Validate Input
 
 ```typescript
 // ✅ Good - Add validation
@@ -842,7 +1145,7 @@ async findAll(
 }
 ```
 
-### 6. Use Indexes
+### 7. Use Indexes
 
 ```prisma
 // ✅ Good - Add indexes for frequently filtered fields
@@ -858,7 +1161,7 @@ model Product {
 }
 ```
 
-### 7. Handle NULL in Optional Relations
+### 8. Handle NULL in Optional Relations
 
 ```prisma
 // ✅ Good - Make optional relations nullable
@@ -920,7 +1223,21 @@ model Product {
 }
 ```
 
-### Issue 4: NULL Filter on Non-Nullable Field
+### Issue 4: NULL Filter Error
+
+**Problem:**
+```bash
+GET /products?filter=categoryId:null
+# Error: Invalid null format
+```
+
+**Solution:**
+```bash
+# Use null() function format
+GET /products?filter=categoryId:null()
+```
+
+### Issue 5: NULL on Non-Nullable Field
 
 **Problem:**
 ```bash
@@ -955,12 +1272,106 @@ model Product {
 
 ---
 
+## Quick Reference Cheat Sheet
+
+### Basic Filters
+
+```bash
+# Exact match
+field:value
+
+# Comparison
+field:gte+int(100)
+field:lt+float(50.5)
+
+# String operations
+field:contains+string(text)
+field:startsWith+string(prefix)
+field:endsWith+string(suffix)
+
+# Boolean
+field:bool(true)
+field:equals+bool(false)
+
+# Date
+field:gte+date(2025-01-01)
+field:lte+datetime(2025-12-31T23:59:59)
+
+# Array
+field:in+array(value1,value2)
+field:has+string(value)
+```
+
+### NULL Filters
+
+```bash
+# Check NULL
+field:null()                    # Direct assignment
+field:equals+null()             # Explicit equals
+
+# Check NOT NULL
+field:not+null()
+
+# Relationship NULL
+relation:null()                 # Check if relationship exists
+relation.field:null()           # Check field in relationship
+
+# Many relationship NULL
+relation.some.field:null()
+relation.every.field:null()
+relation.none.field:null()
+```
+
+### Relation Filters
+
+```bash
+# One-to-one
+relation.field:value
+
+# One-to-many
+relation.some.field:value
+relation.every.field:value
+relation.none.field:value
+
+# Deep nesting
+relation.some.nested.field:value
+```
+
+### Field References
+
+```bash
+# Same table
+field:lte+field(otherField)
+
+# Parent scope
+nested.some.field:lte+field($parent.parentField)
+
+# Root scope
+deep.nested.field:lte+field($root.rootField)
+```
+
+### Multiple Conditions
+
+```bash
+# AND (comma-separated)
+field1:value1,field2:value2
+
+# Date range
+field:gte+date(2025-01-01),field:lte+date(2025-12-31)
+
+# Complex
+active:bool(true),price:gte+int(100),categoryId:not+null()
+```
+
+---
+
 ## Related Documentation
 
 - [📖 Field Reference Complete Guide](./FIELD_REFERENCE.md)
 - [📖 Timezone Configuration](./TIMEZONE.md)
 - [📖 Best Practices](./BEST_PRACTICES.md)
 - [📖 API Reference](./API.md)
+- [📖 Prisma NULL Documentation](https://www.prisma.io/docs/orm/prisma-client/special-fields-and-types/null-and-undefined)
 
 ---
 
