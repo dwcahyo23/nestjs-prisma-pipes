@@ -30,6 +30,32 @@ type FilterOperator = typeof FILTER_OPERATORS[number];
 const RELATION_OPERATORS = ['is', 'isNot', 'some', 'every', 'none'] as const;
 
 /**
+ * Check if a key is a relationship field (not a scalar field or foreign key)
+ * This is determined by checking if it doesn't end with 'Id' and has nested properties
+ */
+function isRelationshipField(key: string, value: any): boolean {
+	// If value is null or has is/isNot operators, it's likely a relationship check
+	if (value === null) {
+		// Check if key looks like a relationship (doesn't end with Id)
+		return !key.endsWith('Id') && !key.endsWith('_id');
+	}
+
+	if (typeof value === 'object' && value !== null) {
+		// Check for relationship operators
+		const hasRelationOp = ['is', 'isNot', 'some', 'every', 'none'].some(op => op in value);
+		if (hasRelationOp) return true;
+
+		// Check for nested object (relationship query)
+		const keys = Object.keys(value);
+		if (keys.length > 0 && !['equals', 'not', 'lt', 'lte', 'gt', 'gte', 'contains', 'startsWith', 'endsWith', 'in', 'has', 'hasEvery', 'hasSome'].includes(keys[0])) {
+			return !key.endsWith('Id') && !key.endsWith('_id');
+		}
+	}
+
+	return false;
+}
+
+/**
  * Parse null value - ONLY accepts null() format
  * Returns null for valid null() format
  */
@@ -309,26 +335,46 @@ export default class WherePipe implements PipeTransform {
 				let finalValue: any;
 
 				if (operator) {
-					// Has operator: always wrap in operator object
-					// Examples:
-					// - equals null() → { equals: null }
-					// - not null() → { not: null }
-					if (isFieldReference(parsedValue)) {
-						finalValue = { [operator]: convertToFieldReference(parsedValue) };
+					// Has operator: handle based on operator type
+					if (operator === 'not') {
+						// Special handling for 'not' operator
+						if (parsedValue === null) {
+							// For relationships: not null → use isNot
+							// For scalar fields: not null → use { not: null }
+							if (isRelationshipField(ruleKey, parsedValue)) {
+								finalValue = { isNot: null };
+							} else {
+								finalValue = { not: null };
+							}
+						} else if (isFieldReference(parsedValue)) {
+							finalValue = { not: convertToFieldReference(parsedValue) };
+						} else {
+							finalValue = { not: parsedValue };
+						}
 					} else {
-						finalValue = { [operator]: parsedValue };
+						// Other operators: wrap normally
+						if (isFieldReference(parsedValue)) {
+							finalValue = { [operator]: convertToFieldReference(parsedValue) };
+						} else {
+							finalValue = { [operator]: parsedValue };
+						}
 					}
 				} else {
 					// No operator: direct assignment for simple values
-					// Examples:
-					// - null() → null (direct assignment)
-					// - field(qty) → { equals: field_ref } (wrap field refs)
-					if (isFieldReference(parsedValue)) {
+					if (parsedValue === null) {
+						// NULL without operator
+						// For relationships: use { is: null }
+						// For scalar fields: use null directly
+						if (isRelationshipField(ruleKey, parsedValue)) {
+							finalValue = { is: null };
+						} else {
+							finalValue = null;
+						}
+					} else if (isFieldReference(parsedValue)) {
 						// Field references need explicit equals even without operator
 						finalValue = { equals: convertToFieldReference(parsedValue) };
 					} else {
-						// Direct assignment for null and other simple values
-						// This follows Prisma convention: { field: null } is valid
+						// Direct assignment for other simple values
 						finalValue = parsedValue;
 					}
 				}

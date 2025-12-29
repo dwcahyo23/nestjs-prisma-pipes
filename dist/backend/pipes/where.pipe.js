@@ -22,6 +22,21 @@ const FILTER_OPERATORS = [
     'in', 'has', 'hasEvery', 'hasSome',
 ];
 const RELATION_OPERATORS = ['is', 'isNot', 'some', 'every', 'none'];
+function isRelationshipField(key, value) {
+    if (value === null) {
+        return !key.endsWith('Id') && !key.endsWith('_id');
+    }
+    if (typeof value === 'object' && value !== null) {
+        const hasRelationOp = ['is', 'isNot', 'some', 'every', 'none'].some(op => op in value);
+        if (hasRelationOp)
+            return true;
+        const keys = Object.keys(value);
+        if (keys.length > 0 && !['equals', 'not', 'lt', 'lte', 'gt', 'gte', 'contains', 'startsWith', 'endsWith', 'in', 'has', 'hasEvery', 'hasSome'].includes(keys[0])) {
+            return !key.endsWith('Id') && !key.endsWith('_id');
+        }
+    }
+    return false;
+}
 function parseStringToNull(ruleValue) {
     if (ruleValue === 'null()') {
         return null;
@@ -183,15 +198,41 @@ let WherePipe = class WherePipe {
                 }
                 let finalValue;
                 if (operator) {
-                    if (isFieldReference(parsedValue)) {
-                        finalValue = { [operator]: convertToFieldReference(parsedValue) };
+                    if (operator === 'not') {
+                        if (parsedValue === null) {
+                            if (isRelationshipField(ruleKey, parsedValue)) {
+                                finalValue = { isNot: null };
+                            }
+                            else {
+                                finalValue = { not: null };
+                            }
+                        }
+                        else if (isFieldReference(parsedValue)) {
+                            finalValue = { not: convertToFieldReference(parsedValue) };
+                        }
+                        else {
+                            finalValue = { not: parsedValue };
+                        }
                     }
                     else {
-                        finalValue = { [operator]: parsedValue };
+                        if (isFieldReference(parsedValue)) {
+                            finalValue = { [operator]: convertToFieldReference(parsedValue) };
+                        }
+                        else {
+                            finalValue = { [operator]: parsedValue };
+                        }
                     }
                 }
                 else {
-                    if (isFieldReference(parsedValue)) {
+                    if (parsedValue === null) {
+                        if (isRelationshipField(ruleKey, parsedValue)) {
+                            finalValue = { is: null };
+                        }
+                        else {
+                            finalValue = null;
+                        }
+                    }
+                    else if (isFieldReference(parsedValue)) {
                         finalValue = { equals: convertToFieldReference(parsedValue) };
                     }
                     else {

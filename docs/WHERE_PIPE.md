@@ -435,42 +435,86 @@ GET /products?filter=categoryId:equals+null()
 
 **Important Distinction:**
 
-| Check | Syntax | What it checks |
-|-------|--------|----------------|
-| Foreign Key | `categoryId:null()` | If FK is NULL |
-| Relationship | `category:null()` | If relationship exists |
-| Field in Relation | `category.name:null()` | If field inside relation is NULL |
+Prisma uses **different operators** for scalar fields vs relationships:
+
+| Type | NULL Check | NOT NULL Check |
+|------|------------|----------------|
+| **Scalar Field** (e.g., `categoryId`) | `field: null` or `{ equals: null }` | `{ not: null }` |
+| **Relationship** (e.g., `category`) | `{ is: null }` | `{ isNot: null }` |
+
+**Why the difference?**
+- Scalar fields use standard operators: `equals`, `not`
+- Relationships use special operators: `is`, `isNot`
 
 **Examples:**
 
 ```bash
-# 1. Check if relationship EXISTS
-GET /products?filter=category:null()           # No category relationship
-GET /products?filter=category:not+null()       # Has category relationship
+# ❌ WRONG - Using 'not' on relationship
+GET /schedules?filter=hseAparResult:not+null()
+# Error: Unknown argument `not`. Did you mean `is`?
 
-# 2. Check specific FIELD in relationship
-GET /products?filter=category.name:null()      # Category exists but name is NULL
-GET /products?filter=category.is.name:null()   # Explicit relation filter
+# ✅ CORRECT - Using 'isNot' for relationship
+# WherePipe automatically detects and converts:
+GET /schedules?filter=hseAparResult:not+null()
+# → { hseAparResult: { isNot: null } }
+
+# ✅ CORRECT - Check if relationship exists
+GET /schedules?filter=hseAparResult:null()
+# → { hseAparResult: { is: null } }
+
+# ✅ CORRECT - Scalar field (foreign key)
+GET /schedules?filter=scheduleId:null()
+# → { scheduleId: null }
+
+GET /schedules?filter=scheduleId:not+null()
+# → { scheduleId: { not: null } }
 ```
 
-**Prisma Output:**
-```typescript
-// category:null()
-{ category: null }
+**WherePipe Smart Detection:**
 
-// category.name:null()
-{
-  category: {
-    name: null        // Category exists but name is NULL
-  }
-}
+WherePipe automatically detects whether a field is a relationship or scalar:
 
-// category.is.name:null()
-{
-  category: {
-    is: { name: null }
-  }
+```bash
+# Relationships (auto-detected by field name not ending with 'Id')
+hseAparResult:null()      → { hseAparResult: { is: null } }
+hseAparResult:not+null()  → { hseAparResult: { isNot: null } }
+category:null()           → { category: { is: null } }
+profile:not+null()        → { profile: { isNot: null } }
+
+# Scalar Fields (foreign keys, regular fields)
+scheduleId:null()         → { scheduleId: null }
+categoryId:not+null()     → { categoryId: { not: null } }
+email:null()              → { email: null }
+```
+
+**Schema Reference:**
+
+```prisma
+model HseAparSchedule {
+  id              String          @id
+  
+  // ✅ Scalar field - uses 'not'
+  scheduleId      String?
+  
+  // ✅ Relationship - uses 'isNot'
+  hseAparResult   HseAparResult?
 }
+```
+
+**Common Patterns:**
+
+```bash
+# 1. Check if one-to-one relationship is NULL
+GET /schedules?filter=hseAparResult:null()
+# → Schedules WITHOUT results
+
+# 2. Check if one-to-one relationship EXISTS
+GET /schedules?filter=hseAparResult:not+null()
+# → Schedules WITH results
+
+# 3. Combine relationship and scalar NULL checks
+GET /schedules?filter=hseAparResult:null(),isActive:bool(true)
+# → Active schedules without results
 ```
 
 #### Many Relationship NULL Checks
@@ -549,33 +593,36 @@ GET /orders?filter=customer:not+null(),customer.phone:null()
 │ What are you checking for NULL?    │
 └─────────────────────────────────────┘
                 │
-        ┌───────┴───────┐
-        │               │
-    ┌───▼────┐     ┌────▼────┐
-    │Foreign │     │Relation │
-    │Key ID  │     │Object   │
-    └───┬────┘     └────┬────┘
-        │               │
-┌───────▼─────────┐ ┌──▼────────────────┐
-│categoryId:null()│ │category:null()    │
-│                 │ │                   │
-│Checks if FK     │ │Checks if relation │
-│is NULL          │ │exists             │
-└─────────────────┘ └───────────────────┘
-                        │
-            ┌───────────▼──────────────┐
-            │Field inside relationship?│
-            └───────────┬──────────────┘
-                        │
-                ┌───────┴────────┐
-                │                │
-        ┌───────▼──────┐  ┌──────▼────────┐
-        │category.name:│  │reviews.some.  │
-        │null()        │  │comment:null() │
-        │              │  │               │
-        │Field in      │  │Field in many  │
-        │relation      │  │relation       │
-        └──────────────┘  └───────────────┘
+        ┌───────┴───────────┐
+        │                   │
+    ┌───▼────────┐    ┌─────▼─────────┐
+    │Scalar Field│    │Relationship   │
+    │(ends in Id)│    │(no Id suffix) │
+    └───┬────────┘    └─────┬─────────┘
+        │                   │
+        │                   │
+┌───────▼─────────┐  ┌──────▼────────────────┐
+│categoryId:null()│  │category:null()        │
+│                 │  │hseAparResult:null()   │
+│Uses standard    │  │                       │
+│operators:       │  │Uses relationship ops: │
+│- null           │  │- { is: null }         │
+│- { not: null }  │  │- { isNot: null }      │
+└─────────────────┘  └───────────────────────┘
+                            │
+                ┌───────────▼──────────────┐
+                │Field inside relationship?│
+                └───────────┬──────────────┘
+                            │
+                    ┌───────┴────────┐
+                    │                │
+            ┌───────▼──────┐  ┌──────▼────────┐
+            │category.name:│  │reviews.some.  │
+            │null()        │  │comment:null() │
+            │              │  │               │
+            │Uses standard │  │Uses standard  │
+            │null operator │  │null operator  │
+            └──────────────┘  └───────────────┘
 ```
 
 #### NULL Error Handling
